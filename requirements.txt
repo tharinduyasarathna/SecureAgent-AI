@@ -1,0 +1,23 @@
+# SecureAgent AI — central Python dependencies (Phase 1)
+# Install from repository root: python -m pip install -r requirements.txt
+# Web frontend dependencies are managed separately by apps/web/package.json.
+
+# API
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+pydantic-settings>=2.5,<3
+email-validator>=2,<3
+
+# Persistence and caching
+sqlalchemy>=2.0,<3
+psycopg[binary]>=3.2,<4
+redis>=5,<7
+
+# Authentication
+pwdlib[argon2]>=0.2,<1
+PyJWT>=2.9,<3
+
+# Testing and linting
+pytest>=8,<10
+httpx>=0.27,<1
+ruff>=0.7,<1
