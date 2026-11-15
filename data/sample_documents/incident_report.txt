@@ -1,0 +1,27 @@
+
+SecureAgent AI - Sample Security Incident Report
+
+Incident ID: SEC-2026-001
+Severity: High
+Category: Suspicious Authentication Activity
+
+Summary:
+Multiple failed login attempts were detected against an
+administrative account from an unfamiliar IP address.
+
+Observations:
+The monitoring system recorded 45 failed authentication
+attempts within five minutes.
+
+Potential Threat:
+The activity may indicate a brute-force password attack.
+
+Recommended Actions:
+1. Review authentication logs.
+2. Investigate the source IP address.
+3. Verify whether the account was compromised.
+4. Enable multi-factor authentication.
+5. Apply appropriate account lockout policies.
+
+Status:
+Investigation pending.
