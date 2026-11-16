@@ -15,11 +15,16 @@ from apps.api.agents.secure_investigation import (
 from apps.api.agents.investigation_report_service import (
     InvestigationReportService,
 )
-from apps.api.agents import investigation_report_models
+from apps.api.agents import investigation_report_models  # noqa: F401
+from apps.api.agents import investigation_review_models  # noqa: F401
+from apps.api.agents.investigation_preferences import (
+    InvestigationPreferences,
+)
 
 from apps.api.app.auth_dependencies import get_current_user
 from apps.api.app.database import get_db
 from apps.api.app.models import User
+from apps.api.app.settings_models import UserSettings
 
 
 logger = logging.getLogger(__name__)
@@ -81,7 +86,9 @@ def get_investigation_workflow():
     )
 
 
-def validate_investigation_id(investigation_id: str) -> str:
+def validate_investigation_id(
+    investigation_id: str,
+) -> str:
     try:
         canonical = str(UUID(investigation_id))
     except (ValueError, AttributeError, TypeError):
@@ -118,6 +125,41 @@ async def create_investigation(
         )
 
     try:
+        preferences = InvestigationPreferences.from_record(
+            db.get(UserSettings, user.id)
+        )
+
+    except Exception:
+        logger.exception(
+            "Failed to retrieve investigation settings"
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to retrieve investigation settings",
+        ) from None
+
+    if len(payload.events) > preferences.max_investigation_events:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Investigation contains {len(payload.events)} "
+                f"events, but your configured limit is "
+                f"{preferences.max_investigation_events}. "
+                "Reduce the number of events or update "
+                "your investigation settings."
+            ),
+        )
+
+    if not preferences.enable_security_agent:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Security Analysis Agent must be enabled "
+                "to run investigations"
+            ),
+        )
+
+    try:
         result = await workflow.run(
             db=db,
             user_id=user.id,
@@ -126,6 +168,7 @@ async def create_investigation(
             granted_permissions=permissions,
             top_k=payload.top_k,
             document_id=payload.document_id,
+            preferences=preferences,
         )
 
     except PermissionError:
@@ -150,7 +193,10 @@ async def create_investigation(
 
     if (
         result.get("status") == "completed"
-        and isinstance(result.get("structured_report"), dict)
+        and isinstance(
+            result.get("structured_report"),
+            dict,
+        )
     ):
         try:
             service = InvestigationReportService(db)
@@ -159,6 +205,7 @@ async def create_investigation(
                 investigation_id=result["investigation_id"],
                 user_id=user.id,
                 structured_report=result["structured_report"],
+                review_required=preferences.require_human_review,
             )
 
         except Exception:
@@ -186,8 +233,15 @@ async def create_investigation(
 
 @router.get("/reports")
 def list_investigation_reports(
-    limit: int = Query(default=20, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    limit: int = Query(
+        default=20,
+        ge=1,
+        le=100,
+    ),
+    offset: int = Query(
+        default=0,
+        ge=0,
+    ),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -201,7 +255,9 @@ def list_investigation_reports(
         )
 
     except Exception:
-        logger.exception("Failed to list investigation reports")
+        logger.exception(
+            "Failed to list investigation reports"
+        )
 
         raise HTTPException(
             status_code=500,
@@ -228,7 +284,9 @@ def get_investigation_report(
         )
 
     except Exception:
-        logger.exception("Failed to retrieve investigation report")
+        logger.exception(
+            "Failed to retrieve investigation report"
+        )
 
         raise HTTPException(
             status_code=500,
@@ -260,7 +318,9 @@ def get_investigation_history(
         )
 
     except Exception:
-        logger.exception("Failed to retrieve investigation history")
+        logger.exception(
+            "Failed to retrieve investigation history"
+        )
 
         raise HTTPException(
             status_code=500,

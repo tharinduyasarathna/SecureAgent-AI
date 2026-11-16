@@ -24,25 +24,45 @@ from apps.api.app.security import (
     verify_password,
 )
 
-# Register ORM models before database initialization.
+# ============================================================
+# Register ORM models before database initialization
+# ============================================================
+
 from apps.api.rag import models as rag_models  # noqa: F401
 from apps.api.agents import audit_models  # noqa: F401
+from apps.api.agents import investigation_report_models  # noqa: F401
+from apps.api.agents import investigation_review_models  # noqa: F401
 
-# Existing API routers.
+# Phase 7.7: Report export audit models
+from apps.api.agents import report_export_models  # noqa: F401
+
+from apps.api.app import settings_models  # noqa: F401
+
+
+# ============================================================
+# API Routers
+# ============================================================
+
 from apps.api.routes.chat import router as chat_router
-from apps.api.routes.documents import (
-    router as documents_router,
-)
-from apps.api.routes.retrieval import (
-    router as retrieval_router,
-)
-from apps.api.routes.rag_chat import (
-    router as rag_chat_router,
-)
+from apps.api.routes.documents import router as documents_router
+from apps.api.routes.retrieval import router as retrieval_router
+from apps.api.routes.rag_chat import router as rag_chat_router
 
-# Phase 5: Secure investigation API.
 from apps.api.routes.investigations import (
     router as investigations_router,
+)
+
+from apps.api.routes.settings import (
+    router as settings_router,
+)
+
+from apps.api.routes.reviews import (
+    router as reviews_router,
+)
+
+# Phase 7.7: Secure report exports
+from apps.api.routes.reports import (
+    router as reports_router,
 )
 
 
@@ -53,10 +73,10 @@ from apps.api.routes.investigations import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Initialize database tables when the application starts.
+    Initialize database tables on application startup.
 
-    For production, use Alembic database migrations
-    instead of create_all().
+    Development only:
+    Use Alembic migrations for production deployments.
     """
     Base.metadata.create_all(bind=engine)
     yield
@@ -91,7 +111,7 @@ app.add_middleware(
         if origin.strip()
     ],
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT"],
     allow_headers=[
         "Authorization",
         "Content-Type",
@@ -254,5 +274,14 @@ app.include_router(documents_router)
 app.include_router(retrieval_router)
 app.include_router(rag_chat_router)
 
-# Phase 5: Agentic cybersecurity investigations
+# Agentic cybersecurity investigations
 app.include_router(investigations_router)
+
+# User configuration
+app.include_router(settings_router)
+
+# Human investigation reviews
+app.include_router(reviews_router)
+
+# Phase 7.7: Secure PDF and JSON report exports
+app.include_router(reports_router)
