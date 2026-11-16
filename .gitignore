@@ -85,3 +85,20 @@ checkpoints/
 chroma_db/
 chroma/
 faiss_index/
+
+# ==========================================
+# PostgreSQL Backups
+# ==========================================
+*.dump
+*.backup
+*.sql.gz
+
+# ==========================================
+# Local Development / Model Testing
+# ==========================================
+check_model.py
+
+# ==========================================
+# Local Security Evaluation Artifacts
+# ==========================================
+evaluations/security_tests/reports/*.json
