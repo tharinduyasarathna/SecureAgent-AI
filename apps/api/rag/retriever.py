@@ -30,10 +30,6 @@ async def retrieve_chunks(
         query_embedding
     )
 
-    distance = RAGChunk.embedding.cosine_distance(
-        query_embedding
-    )
-
     statement = (
         select(
             RAGChunk.id,
