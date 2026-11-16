@@ -105,7 +105,7 @@ export default function RegisterPage() {
             required
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            placeholder="you@example.com"
+            placeholder="name@company.com"
             className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none focus:border-blue-500"
           />
 
@@ -125,7 +125,7 @@ export default function RegisterPage() {
             required
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            placeholder="At least 12 characters"
+            placeholder="Create a password"
             className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none focus:border-blue-500"
           />
 
@@ -145,7 +145,7 @@ export default function RegisterPage() {
             onChange={(event) =>
               setConfirmPassword(event.target.value)
             }
-            placeholder="Repeat your password"
+            placeholder="Re-enter your password"
             className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none focus:border-blue-500"
           />
 

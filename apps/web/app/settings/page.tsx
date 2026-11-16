@@ -238,7 +238,7 @@ function SettingsContent() {
               size={20}
               className="animate-spin text-blue-400"
             />
-            Loading settings from PostgreSQL...
+            Loading your security preferences...
           </div>
         </main>
       </div>
@@ -267,7 +267,7 @@ function SettingsContent() {
 
               <div>
                 <h1 className="text-3xl font-bold tracking-tight">
-                  System Settings
+                  Settings
                 </h1>
                 <p className="mt-2 text-sm text-slate-400">
                   Manage investigation preferences stored
@@ -325,9 +325,9 @@ function SettingsContent() {
         </header>
 
         <div className="mt-6 rounded-xl border border-blue-500/25 bg-blue-500/5 p-4 text-sm leading-6 text-blue-200">
-          Preferences are saved in PostgreSQL for your
-          authenticated account. Mandatory security controls
-          cannot be changed from this page.
+          Preferences are saved securely for your authenticated
+          account. Mandatory security controls cannot be changed
+          from this page.
         </div>
 
         {error && (
@@ -352,7 +352,7 @@ function SettingsContent() {
               <Bot size={22} className="text-blue-400" />
               <div>
                 <h2 className="text-lg font-semibold">
-                  Agent Configuration
+                  Investigation Components
                 </h2>
                 <p className="mt-1 text-xs text-slate-400">
                   Investigation agent preferences
@@ -361,8 +361,8 @@ function SettingsContent() {
             </div>
 
             <SettingToggle
-              title="Security Analysis Agent"
-              description="Enable the security analysis agent preference."
+              title="Threat Analysis"
+              description="Use automated analysis to identify security threats."
               checked={settings.enableSecurityAgent}
               onChange={(value) =>
                 updateBoolean("enableSecurityAgent", value)
@@ -370,8 +370,8 @@ function SettingsContent() {
             />
 
             <SettingToggle
-              title="RAG Knowledge Agent"
-              description="Enable retrieval-augmented investigation context."
+              title="Evidence Retrieval"
+              description="Add authorized context from the security knowledge base."
               checked={settings.enableRagAgent}
               onChange={(value) =>
                 updateBoolean("enableRagAgent", value)
@@ -379,8 +379,8 @@ function SettingsContent() {
             />
 
             <SettingToggle
-              title="Report Generation Agent"
-              description="Enable structured report generation preference."
+              title="Report Generation"
+              description="Create a structured report when an investigation completes."
               checked={settings.enableReportAgent}
               onChange={(value) =>
                 updateBoolean("enableReportAgent", value)
@@ -421,8 +421,8 @@ function SettingsContent() {
             />
 
             <SettingToggle
-              title="Human Review"
-              description="Require analyst review before final approval (preference)."
+              title="Analyst Review"
+              description="Require analyst review before final approval."
               checked={settings.requireHumanReview}
               onChange={(value) =>
                 updateBoolean("requireHumanReview", value)
@@ -452,7 +452,7 @@ function SettingsContent() {
                   htmlFor="severity-threshold"
                   className="mb-2 block text-sm font-medium"
                 >
-                  Default Severity Threshold
+                  Default Severity
                 </label>
 
                 <select
@@ -478,7 +478,7 @@ function SettingsContent() {
                   htmlFor="max-events"
                   className="mb-2 block text-sm font-medium"
                 >
-                  Maximum Investigation Events
+                  Maximum Events per Investigation
                 </label>
 
                 <input
@@ -506,7 +506,7 @@ function SettingsContent() {
 
               <SettingToggle
                 title="Automatic Report Generation"
-                description="Automatically generate a report after investigation (preference)."
+                description="Generate a report automatically when an investigation completes."
                 checked={settings.autoGenerateReport}
                 onChange={(value) =>
                   updateBoolean("autoGenerateReport", value)
@@ -523,10 +523,10 @@ function SettingsContent() {
               />
               <div>
                 <h2 className="text-lg font-semibold">
-                  System Information
+                  Platform Information
                 </h2>
                 <p className="mt-1 text-xs text-slate-400">
-                  SecureAgent AI development environment
+                  SecureAgent AI platform configuration
                 </p>
               </div>
             </div>

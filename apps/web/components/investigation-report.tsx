@@ -679,7 +679,7 @@ export default function InvestigationReport({ data }: Props) {
                   Secure Report Export
                 </p>
                 <p className="mt-1 text-xs text-slate-400">
-                  Server-authorized PDF and JSON downloads
+                  Authorized PDF and JSON downloads
                 </p>
               </div>
             </div>
@@ -783,7 +783,7 @@ export default function InvestigationReport({ data }: Props) {
             <p className="mt-3 flex items-center gap-2 text-xs text-amber-300">
               <LockKeyhole size={14} />
               {reviewStatus === "pending"
-                ? "Human approval is required before exporting."
+                ? "Analyst approval is required before exporting."
                 : reviewStatus === "rejected"
                   ? "This report was rejected and cannot be exported."
                   : "Export authorization could not be verified."}
@@ -1057,7 +1057,7 @@ export default function InvestigationReport({ data }: Props) {
                 className="text-purple-400"
               />
               <h3 className="text-lg font-semibold">
-                Agent Execution & Audit History
+                Investigation Activity & Audit History
               </h3>
             </div>
 
@@ -1102,7 +1102,7 @@ export default function InvestigationReport({ data }: Props) {
               className="text-blue-400"
             />
             <span className="font-semibold">
-              Technical JSON Response
+              Raw Response Data
             </span>
 
             {showRaw ? (

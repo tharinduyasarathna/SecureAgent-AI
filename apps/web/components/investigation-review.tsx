@@ -448,7 +448,7 @@ export default function InvestigationReviewPanel({
                 }}
                 maxLength={2000}
                 rows={5}
-                placeholder="Explain your decision based on the investigation findings and evidence..."
+                placeholder="Add notes supporting your decision..."
                 disabled={submitting !== null}
                 className="w-full resize-y rounded-xl border border-slate-700 bg-[#080d19] px-4 py-3 text-sm text-white outline-none transition focus:border-blue-500 disabled:opacity-60"
               />

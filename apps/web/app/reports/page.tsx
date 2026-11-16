@@ -391,7 +391,7 @@ function ReportsLibrary() {
                   setSearch(event.target.value);
                   setPage(1);
                 }}
-                placeholder="Search title, ID, or severity..."
+                placeholder="Search by title, ID, or severity..."
                 aria-label="Search reports"
                 className="w-full rounded-xl border border-slate-700 bg-[#080d19] py-3 pl-11 pr-4 text-sm text-white outline-none focus:border-blue-500"
               />

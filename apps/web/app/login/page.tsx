@@ -91,7 +91,7 @@ export default function LoginPage() {
             required
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            placeholder="you@example.com"
+            placeholder="name@company.com"
             className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none transition focus:border-blue-500"
           />
 
@@ -112,7 +112,7 @@ export default function LoginPage() {
               onChange={(event) =>
                 setPassword(event.target.value)
               }
-              placeholder="Enter your password"
+              placeholder="Use your account password"
               className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 pr-12 text-white outline-none transition focus:border-blue-500"
             />
 

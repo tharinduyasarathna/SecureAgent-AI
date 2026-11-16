@@ -156,8 +156,8 @@ function InvestigationWorkspace() {
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-400">
-                  Enter the JSON payload accepted by
-                  POST /investigations.
+                  Enter the JSON request used to start an
+                  investigation.
                 </p>
               </div>
 
@@ -188,13 +188,12 @@ function InvestigationWorkspace() {
               disabled={loading}
               spellCheck={false}
               className="mt-3 min-h-[380px] w-full resize-y rounded-xl border border-slate-700 bg-[#080d19] p-5 font-mono text-sm leading-6 text-slate-200 outline-none transition focus:border-blue-500 disabled:opacity-60"
-              placeholder="Paste your investigation request JSON here..."
+              placeholder="Enter a JSON request payload..."
             />
 
             <p className="mt-3 text-xs text-slate-500">
-              Use the same request structure you previously tested
-              successfully in Swagger. The backend validates the
-              payload and enforces investigation permissions.
+              The service validates your request and enforces
+              investigation permissions before processing it.
             </p>
 
             {error && (
@@ -256,12 +255,12 @@ function InvestigationWorkspace() {
             </div>
 
             <p className="mt-2 text-sm text-slate-400">
-              Your existing bounded multi-agent workflow.
+              A controlled workflow for analyzing security events.
             </p>
 
             <div className="mt-7 rounded-xl border border-blue-500/20 bg-blue-500/10 p-4 text-center">
               <p className="font-semibold text-blue-300">
-                Supervisor Agent
+                Investigation Coordinator
               </p>
 
               <p className="mt-1 text-xs text-slate-400">
@@ -279,7 +278,7 @@ function InvestigationWorkspace() {
                     "Event correlation and threat detection",
                 },
                 {
-                  name: "RAG Knowledge",
+                  name: "Evidence Retrieval",
                   description:
                     "Authorized contextual retrieval",
                 },

@@ -37,7 +37,7 @@ const capabilities = [
     color: "text-blue-400",
   },
   {
-    title: "RAG Knowledge",
+    title: "Evidence Retrieval",
     description:
       "Retrieve relevant context from authorized security documents.",
     icon: BrainCircuit,
@@ -416,7 +416,7 @@ export default function Dashboard() {
               />
 
               <h2 className="text-lg font-semibold text-white">
-                AI Agent Architecture
+                Investigation Workflow
               </h2>
             </div>
 
