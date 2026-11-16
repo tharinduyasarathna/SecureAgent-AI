@@ -1,4 +1,12 @@
 
+import { apiRequest } from "@/lib/api";
+
+export type SeverityThreshold =
+  | "low"
+  | "medium"
+  | "high"
+  | "critical";
+
 export type SecuritySettings = {
   enableSecurityAgent: boolean;
   enableRagAgent: boolean;
@@ -6,7 +14,7 @@ export type SecuritySettings = {
   requireHumanReview: boolean;
   enableAuditLogging: boolean;
   enablePromptInjectionProtection: boolean;
-  defaultSeverityThreshold: "low" | "medium" | "high" | "critical";
+  defaultSeverityThreshold: SeverityThreshold;
   maxInvestigationEvents: number;
   autoGenerateReport: boolean;
 };
@@ -23,88 +31,101 @@ export const DEFAULT_SETTINGS: SecuritySettings = {
   autoGenerateReport: true,
 };
 
-const STORAGE_KEY = "secureagent_ui_settings";
+type ApiPreferences = {
+  enable_security_agent: boolean;
+  enable_rag_agent: boolean;
+  enable_report_agent: boolean;
+  require_human_review: boolean;
+  default_severity_threshold: SeverityThreshold;
+  max_investigation_events: number;
+  auto_generate_report: boolean;
+};
 
-export function loadSettings(): SecuritySettings {
-  if (typeof window === "undefined") {
-    return { ...DEFAULT_SETTINGS };
-  }
+type ApiSecurityPolicy = {
+  audit_logging_enabled: true;
+  prompt_injection_protection_enabled: true;
+  authentication_required: true;
+  owner_scoped_data_access: true;
+};
 
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+export type SettingsApiResponse = {
+  preferences: ApiPreferences;
+  security_policy: ApiSecurityPolicy;
+};
 
-    if (!saved) return { ...DEFAULT_SETTINGS };
+function toFrontendSettings(
+  response: SettingsApiResponse
+): SecuritySettings {
+  const preferences = response.preferences;
 
-    const parsed: unknown = JSON.parse(saved);
-
-    if (
-      parsed === null ||
-      typeof parsed !== "object" ||
-      Array.isArray(parsed)
-    ) {
-      return { ...DEFAULT_SETTINGS };
-    }
-
-    const input = parsed as Record<string, unknown>;
-
-    const booleanSetting = (
-      key: keyof SecuritySettings,
-      fallback: boolean
-    ): boolean =>
-      typeof input[key] === "boolean"
-        ? (input[key] as boolean)
-        : fallback;
-
-    const threshold = input.defaultSeverityThreshold;
-
-    const maxEvents = input.maxInvestigationEvents;
-
-    return {
-      enableSecurityAgent: booleanSetting(
-        "enableSecurityAgent",
-        true
-      ),
-      enableRagAgent: booleanSetting("enableRagAgent", true),
-      enableReportAgent: booleanSetting(
-        "enableReportAgent",
-        true
-      ),
-      requireHumanReview: booleanSetting(
-        "requireHumanReview",
-        true
-      ),
-      enableAuditLogging: booleanSetting(
-        "enableAuditLogging",
-        true
-      ),
-      enablePromptInjectionProtection: booleanSetting(
-        "enablePromptInjectionProtection",
-        true
-      ),
-      defaultSeverityThreshold:
-        typeof threshold === "string" &&
-        ["low", "medium", "high", "critical"].includes(threshold)
-          ? (threshold as SecuritySettings["defaultSeverityThreshold"])
-          : "medium",
-      maxInvestigationEvents:
-        typeof maxEvents === "number" &&
-        Number.isInteger(maxEvents) &&
-        maxEvents >= 1 &&
-        maxEvents <= 10000
-          ? maxEvents
-          : 100,
-      autoGenerateReport: booleanSetting(
-        "autoGenerateReport",
-        true
-      ),
-    };
-  } catch {
-    return { ...DEFAULT_SETTINGS };
-  }
+  return {
+    enableSecurityAgent:
+      preferences.enable_security_agent,
+    enableRagAgent:
+      preferences.enable_rag_agent,
+    enableReportAgent:
+      preferences.enable_report_agent,
+    requireHumanReview:
+      preferences.require_human_review,
+    enableAuditLogging:
+      response.security_policy.audit_logging_enabled,
+    enablePromptInjectionProtection:
+      response.security_policy
+        .prompt_injection_protection_enabled,
+    defaultSeverityThreshold:
+      preferences.default_severity_threshold,
+    maxInvestigationEvents:
+      preferences.max_investigation_events,
+    autoGenerateReport:
+      preferences.auto_generate_report,
+  };
 }
 
-export function saveSettings(settings: SecuritySettings): void {
-  if (typeof window === "undefined") return;
+function toApiPreferences(
+  settings: SecuritySettings
+): ApiPreferences {
+  return {
+    enable_security_agent:
+      settings.enableSecurityAgent,
+    enable_rag_agent:
+      settings.enableRagAgent,
+    enable_report_agent:
+      settings.enableReportAgent,
+    require_human_review:
+      settings.requireHumanReview,
+    default_severity_threshold:
+      settings.defaultSeverityThreshold,
+    max_investigation_events:
+      settings.maxInvestigationEvents,
+    auto_generate_report:
+      settings.autoGenerateReport,
+  };
+}
 
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+export async function getSettings(
+  token: string
+): Promise<SecuritySettings> {
+  const response = await apiRequest<SettingsApiResponse>(
+    "/settings",
+    { method: "GET" },
+    token
+  );
+
+  return toFrontendSettings(response);
+}
+
+export async function updateSettings(
+  token: string,
+  settings: SecuritySettings
+): Promise<SecuritySettings> {
+  const response = await apiRequest<SettingsApiResponse>(
+    "/settings",
+    {
+      method: "PUT",
+      body: JSON.stringify(toApiPreferences(settings)),
+    },
+    token
+  );
+
+  return toFrontendSettings(response);
 }

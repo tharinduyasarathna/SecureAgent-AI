@@ -1,9 +1,10 @@
 
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Activity,
+  AlertCircle,
   AlertTriangle,
   CalendarClock,
   Check,
@@ -16,7 +17,9 @@ import {
   Fingerprint,
   History,
   ListChecks,
-  Printer,
+  LoaderCircle,
+  LockKeyhole,
+  RefreshCw,
   ShieldAlert,
   UserRound,
   X,
@@ -24,6 +27,13 @@ import {
 
 import { useAuth } from "@/components/auth-provider";
 import { apiRequest } from "@/lib/api";
+import {
+  canExportReport,
+  downloadInvestigationReport,
+  type ReportExportFormat,
+  type ReportExportStatus,
+} from "@/lib/report-exports";
+import { getInvestigationReview } from "@/lib/reviews";
 
 type JsonObject = Record<string, unknown>;
 
@@ -58,9 +68,14 @@ function pick(
 function textOf(value: unknown): string {
   if (value === null || value === undefined) return "—";
   if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") {
+
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
     return String(value);
   }
+
   return JSON.stringify(value, null, 2);
 }
 
@@ -164,6 +179,34 @@ function Metric({
   );
 }
 
+function isReviewStatus(
+  value: unknown
+): value is ReportExportStatus {
+  return (
+    value === "pending" ||
+    value === "approved" ||
+    value === "rejected" ||
+    value === "not_required"
+  );
+}
+
+function reviewStatusClass(
+  status: ReportExportStatus | null
+): string {
+  switch (status) {
+    case "approved":
+      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
+    case "not_required":
+      return "border-blue-500/30 bg-blue-500/10 text-blue-300";
+    case "rejected":
+      return "border-red-500/30 bg-red-500/10 text-red-300";
+    case "pending":
+      return "border-amber-500/30 bg-amber-500/10 text-amber-300";
+    default:
+      return "border-slate-700 bg-slate-800 text-slate-400";
+  }
+}
+
 export default function InvestigationReport({ data }: Props) {
   const { token } = useAuth();
 
@@ -180,7 +223,25 @@ export default function InvestigationReport({ data }: Props) {
   const [auditError, setAuditError] = useState<string | null>(null);
   const [auditOpen, setAuditOpen] = useState(false);
 
-  const report = objectOf(data.report) ?? data;
+  const [reviewStatus, setReviewStatus] =
+    useState<ReportExportStatus | null>(null);
+  const [reviewLoading, setReviewLoading] = useState(true);
+  const [reviewError, setReviewError] = useState<string | null>(
+    null
+  );
+  const [exporting, setExporting] =
+    useState<ReportExportFormat | null>(null);
+  const [exportError, setExportError] = useState<string | null>(
+    null
+  );
+  const [exportMessage, setExportMessage] =
+    useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const report =
+    objectOf(data.structured_report) ??
+    objectOf(data.report) ??
+    data;
 
   const rawId =
     pick(data, ["investigation_id", "id"]) ??
@@ -189,8 +250,17 @@ export default function InvestigationReport({ data }: Props) {
   const id = typeof rawId === "string" ? rawId : null;
 
   const severity = textOf(
-    pick(report, ["overall_severity", "severity", "risk_level"]) ??
-      pick(data, ["overall_severity", "severity", "risk_level"])
+    pick(report, [
+      "overall_severity",
+      "severity",
+      "risk_level",
+    ]) ??
+      pick(objectOf(report.risk_assessment), ["severity"]) ??
+      pick(data, [
+        "overall_severity",
+        "severity",
+        "risk_level",
+      ])
   );
 
   const findings = listOf(
@@ -199,8 +269,14 @@ export default function InvestigationReport({ data }: Props) {
   );
 
   const recommendations = listOf(
-    pick(report, ["recommendations", "recommended_actions"]) ??
-      pick(data, ["recommendations", "recommended_actions"])
+    pick(report, [
+      "recommendations",
+      "recommended_actions",
+    ]) ??
+      pick(data, [
+        "recommendations",
+        "recommended_actions",
+      ])
   );
 
   const evidence = listOf(
@@ -215,7 +291,10 @@ export default function InvestigationReport({ data }: Props) {
     pick(report, ["username", "user"]);
 
   const failedAttempts =
-    pick(primaryFinding, ["failed_attempts", "failure_count"]) ??
+    pick(primaryFinding, [
+      "failed_attempts",
+      "failure_count",
+    ]) ??
     pick(report, ["failed_attempts"]);
 
   const timestamp =
@@ -224,7 +303,8 @@ export default function InvestigationReport({ data }: Props) {
       "timestamp",
       "event_time",
     ]) ??
-    pick(report, ["created_at", "timestamp"]);
+    pick(report, ["created_at", "timestamp"]) ??
+    pick(data, ["created_at"]);
 
   const sourceIp =
     pick(primaryFinding, [
@@ -277,38 +357,154 @@ export default function InvestigationReport({ data }: Props) {
       : findingRecommendations;
 
   const sourceEvents = listOf(
-    pick(data, ["events", "source_events", "input_events"]) ??
-      pick(report, ["events", "source_events", "input_events"])
+    pick(data, [
+      "events",
+      "source_events",
+      "input_events",
+    ]) ??
+      pick(report, [
+        "events",
+        "source_events",
+        "input_events",
+      ])
   );
 
   const auditKey = `${token ?? ""}:${id ?? ""}`;
   const currentAudit =
     audit?.key === auditKey ? audit.data : null;
 
-  async function copy(value: string, label: string) {
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!id || !token) {
+      return;
+    }
+
+    async function loadStatus() {
+      try {
+        const result = await getInvestigationReview(
+          id!,
+          token!
+        );
+
+        if (!cancelled) {
+          setReviewStatus(
+            isReviewStatus(result.status)
+              ? result.status
+              : null
+          );
+          setReviewError(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setReviewStatus(null);
+          setReviewError(
+            error instanceof Error
+              ? error.message
+              : "Unable to verify review status."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setReviewLoading(false);
+        }
+      }
+    }
+
+    void loadStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, token]);
+
+  async function refreshReviewStatus() {
+    if (!id || !token || refreshing) return;
+
+    setRefreshing(true);
+    setReviewError(null);
+    setExportError(null);
+
+    try {
+      const result = await getInvestigationReview(
+        id,
+        token
+      );
+
+      setReviewStatus(
+        isReviewStatus(result.status)
+          ? result.status
+          : null
+      );
+    } catch (error) {
+      setReviewStatus(null);
+      setReviewError(
+        error instanceof Error
+          ? error.message
+          : "Unable to refresh review status."
+      );
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  async function exportReport(
+    format: ReportExportFormat
+  ) {
+    if (!id || !token || exporting) return;
+
+    setExporting(format);
+    setExportError(null);
+    setExportMessage(null);
+
+    try {
+      const review = await getInvestigationReview(
+        id,
+        token
+      );
+
+      const status = isReviewStatus(review.status)
+        ? review.status
+        : null;
+
+      setReviewStatus(status);
+
+      if (!canExportReport(status)) {
+        throw new Error(
+          "This report requires approval before export."
+        );
+      }
+
+      await downloadInvestigationReport(
+        id,
+        token,
+        format
+      );
+
+      setExportMessage(
+        `${format.toUpperCase()} export requested successfully.`
+      );
+    } catch (error) {
+      setExportError(
+        error instanceof Error
+          ? error.message
+          : "Report export failed."
+      );
+    } finally {
+      setExporting(null);
+    }
+  }
+
+  async function copy(
+    value: string,
+    label: string
+  ) {
     try {
       await navigator.clipboard.writeText(value);
       setCopied(label);
     } catch {
       setCopied(null);
     }
-  }
-
-  function downloadJson() {
-    const blob = new Blob([JSON.stringify(data, null, 2)], {
-      type: "application/json",
-    });
-
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-
-    anchor.href = url;
-    anchor.download = `secureagent-report-${id ?? "export"}.json`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-
-    URL.revokeObjectURL(url);
   }
 
   async function openAudit() {
@@ -328,7 +524,10 @@ export default function InvestigationReport({ data }: Props) {
         token
       );
 
-      setAudit({ key: auditKey, data: response });
+      setAudit({
+        key: auditKey,
+        data: response,
+      });
     } catch (error) {
       setAuditError(
         error instanceof Error
@@ -383,6 +582,11 @@ export default function InvestigationReport({ data }: Props) {
           ].includes(key)
       )
     : [];
+
+  const exportAllowed =
+    canExportReport(reviewStatus) &&
+    !reviewLoading &&
+    !reviewError;
 
   return (
     <div className="space-y-6 text-white">
@@ -455,34 +659,164 @@ export default function InvestigationReport({ data }: Props) {
           />
         </div>
 
-        <div className="mt-6 flex flex-wrap gap-3 print:hidden">
-          <button
-            type="button"
-            onClick={downloadJson}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:bg-slate-800"
-          >
-            <Download size={16} />
-            Download JSON
-          </button>
+        <div className="mt-6 rounded-xl border border-slate-700/70 bg-[#080d19] p-4 print:hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              {exportAllowed ? (
+                <Check
+                  size={19}
+                  className="text-emerald-400"
+                />
+              ) : (
+                <LockKeyhole
+                  size={19}
+                  className="text-amber-400"
+                />
+              )}
 
-          <button
-            type="button"
-            onClick={() => window.print()}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-200 transition hover:bg-slate-800"
-          >
-            <Printer size={16} />
-            Print / Save PDF
-          </button>
+              <div>
+                <p className="text-sm font-semibold text-white">
+                  Secure Report Export
+                </p>
+                <p className="mt-1 text-xs text-slate-400">
+                  Server-authorized PDF and JSON downloads
+                </p>
+              </div>
+            </div>
 
-          {id && token && (
+            <div className="flex items-center gap-2">
+              <span
+                className={`rounded-full border px-3 py-1 text-xs font-medium capitalize ${reviewStatusClass(
+                  reviewStatus
+                )}`}
+              >
+                {reviewLoading
+                  ? "Checking..."
+                  : reviewStatus
+                    ? reviewStatus.replaceAll("_", " ")
+                    : "Unavailable"}
+              </span>
+
+              <button
+                type="button"
+                onClick={() =>
+                  void refreshReviewStatus()
+                }
+                disabled={
+                  refreshing ||
+                  exporting !== null ||
+                  !id ||
+                  !token
+                }
+                title="Refresh review status"
+                aria-label="Refresh review status"
+                className="rounded-lg border border-slate-700 p-2 text-slate-300 transition hover:bg-slate-800 disabled:opacity-50"
+              >
+                <RefreshCw
+                  size={16}
+                  className={
+                    refreshing ? "animate-spin" : ""
+                  }
+                />
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-3">
             <button
               type="button"
-              onClick={() => void openAudit()}
-              className="inline-flex items-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-2 text-sm text-blue-300 transition hover:bg-blue-500/20"
+              onClick={() => void exportReport("pdf")}
+              disabled={
+                !exportAllowed ||
+                exporting !== null ||
+                !id ||
+                !token
+              }
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <History size={16} />
-              View Audit History
+              {exporting === "pdf" ? (
+                <LoaderCircle
+                  size={17}
+                  className="animate-spin"
+                />
+              ) : (
+                <Download size={17} />
+              )}
+              Download PDF
             </button>
+
+            <button
+              type="button"
+              onClick={() => void exportReport("json")}
+              disabled={
+                !exportAllowed ||
+                exporting !== null ||
+                !id ||
+                !token
+              }
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {exporting === "json" ? (
+                <LoaderCircle
+                  size={17}
+                  className="animate-spin"
+                />
+              ) : (
+                <Download size={17} />
+              )}
+              Download JSON
+            </button>
+
+            {id && token && (
+              <button
+                type="button"
+                onClick={() => void openAudit()}
+                className="inline-flex items-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-2.5 text-sm text-blue-300 transition hover:bg-blue-500/20"
+              >
+                <History size={17} />
+                View Audit History
+              </button>
+            )}
+          </div>
+
+          {!exportAllowed && !reviewLoading && (
+            <p className="mt-3 flex items-center gap-2 text-xs text-amber-300">
+              <LockKeyhole size={14} />
+              {reviewStatus === "pending"
+                ? "Human approval is required before exporting."
+                : reviewStatus === "rejected"
+                  ? "This report was rejected and cannot be exported."
+                  : "Export authorization could not be verified."}
+            </p>
+          )}
+
+          {reviewError && (
+            <p
+              role="alert"
+              className="mt-3 flex items-center gap-2 text-sm text-red-300"
+            >
+              <AlertCircle size={16} />
+              {reviewError}
+            </p>
+          )}
+
+          {exportError && (
+            <p
+              role="alert"
+              className="mt-3 flex items-center gap-2 text-sm text-red-300"
+            >
+              <AlertCircle size={16} />
+              {exportError}
+            </p>
+          )}
+
+          {exportMessage && (
+            <p
+              role="status"
+              className="mt-3 text-sm text-emerald-300"
+            >
+              {exportMessage}
+            </p>
           )}
         </div>
       </section>
@@ -490,12 +824,14 @@ export default function InvestigationReport({ data }: Props) {
       {summary !== null && (
         <section className="rounded-2xl border border-orange-500/25 bg-orange-500/[0.06] p-6">
           <div className="mb-3 flex items-center gap-3">
-            <FileText size={20} className="text-orange-400" />
+            <FileText
+              size={20}
+              className="text-orange-400"
+            />
             <h3 className="text-lg font-semibold">
               Executive Summary
             </h3>
           </div>
-
           <Detail value={summary} />
         </section>
       )}
@@ -503,22 +839,30 @@ export default function InvestigationReport({ data }: Props) {
       <div className="grid gap-6 xl:grid-cols-2">
         <section className="rounded-2xl border border-slate-800 bg-[#101827] p-6">
           <div className="mb-5 flex items-center gap-3">
-            <FileText size={21} className="text-blue-400" />
+            <FileText
+              size={21}
+              className="text-blue-400"
+            />
             <h3 className="text-lg font-semibold">
               Investigation Details
             </h3>
           </div>
 
           <div className="divide-y divide-slate-800">
-            {([
-  ["Username", username],
-  ["Failed Attempts", failedAttempts],
-  ["Successful Login", formattedDate(timestamp)],
-  ["Source IP", sourceIp],
-  ["Severity", severity],
-] as [string, unknown][]).map(([label, value]) => (
+            {(
+              [
+                ["Username", username],
+                ["Failed Attempts", failedAttempts],
+                [
+                  "Successful Login",
+                  formattedDate(timestamp),
+                ],
+                ["Source IP", sourceIp],
+                ["Severity", severity],
+              ] as [string, unknown][]
+            ).map(([label, value]) => (
               <div
-                key={String(label)}
+                key={label}
                 className="grid grid-cols-2 gap-3 py-3 text-sm"
               >
                 <span className="text-slate-400">
@@ -546,7 +890,10 @@ export default function InvestigationReport({ data }: Props) {
 
         <section className="rounded-2xl border border-slate-800 bg-[#101827] p-6">
           <div className="mb-5 flex items-center gap-3">
-            <Fingerprint size={21} className="text-blue-400" />
+            <Fingerprint
+              size={21}
+              className="text-blue-400"
+            />
             <h3 className="text-lg font-semibold">
               Evidence References
             </h3>
@@ -555,37 +902,44 @@ export default function InvestigationReport({ data }: Props) {
           {evidenceIndices.length > 0 ? (
             <>
               <p className="mb-5 text-sm text-slate-400">
-                Select an event index to inspect its available
-                evidence.
+                Select an event index to inspect its
+                available evidence.
               </p>
 
               <div className="flex flex-wrap gap-3">
-                {evidenceIndices.map((reference, index) => (
-                  <button
-                    key={index}
-                    type="button"
-                    onClick={() => setSelectedEvidence(index)}
-                    className={`flex h-11 min-w-11 items-center justify-center rounded-xl border px-3 font-mono text-sm font-semibold transition ${
-                      selectedEvidence === index
-                        ? "border-blue-400 bg-blue-600 text-white"
-                        : "border-blue-500/30 bg-blue-500/10 text-blue-300 hover:bg-blue-500/25"
-                    }`}
-                  >
-                    {textOf(reference)}
-                  </button>
-                ))}
+                {evidenceIndices.map(
+                  (reference, index) => (
+                    <button
+                      key={index}
+                      type="button"
+                      onClick={() =>
+                        setSelectedEvidence(index)
+                      }
+                      className={`flex h-11 min-w-11 items-center justify-center rounded-xl border px-3 font-mono text-sm font-semibold transition ${
+                        selectedEvidence === index
+                          ? "border-blue-400 bg-blue-600 text-white"
+                          : "border-blue-500/30 bg-blue-500/10 text-blue-300 hover:bg-blue-500/25"
+                      }`}
+                    >
+                      {textOf(reference)}
+                    </button>
+                  )
+                )}
               </div>
 
               {selectedEvidence !== null && (
                 <div className="mt-6 rounded-xl border border-blue-500/25 bg-[#0b1424] p-5">
                   <div className="flex items-center justify-between gap-3">
                     <h4 className="font-semibold">
-                      Event Reference {textOf(selectedReference)}
+                      Event Reference{" "}
+                      {textOf(selectedReference)}
                     </h4>
 
                     <button
                       type="button"
-                      onClick={() => setSelectedEvidence(null)}
+                      onClick={() =>
+                        setSelectedEvidence(null)
+                      }
                       aria-label="Close evidence details"
                       className="rounded-lg p-1 text-slate-400 hover:bg-slate-800 hover:text-white"
                     >
@@ -600,9 +954,9 @@ export default function InvestigationReport({ data }: Props) {
                       <p className="text-sm leading-6 text-slate-400">
                         This finding references event index{" "}
                         {textOf(selectedReference)}, but the
-                        original event payload is not included in
-                        this report response. Detailed evidence
-                        cannot be displayed yet.
+                        original event payload is not included
+                        in this report response. Detailed
+                        evidence cannot be displayed yet.
                       </p>
                     )}
                   </div>
@@ -636,7 +990,10 @@ export default function InvestigationReport({ data }: Props) {
       {findings.length > 1 && (
         <section className="rounded-2xl border border-slate-800 bg-[#101827] p-6">
           <div className="mb-5 flex items-center gap-3">
-            <ShieldAlert size={21} className="text-orange-400" />
+            <ShieldAlert
+              size={21}
+              className="text-orange-400"
+            />
             <h3 className="text-lg font-semibold">
               Additional Security Findings
             </h3>
@@ -661,26 +1018,32 @@ export default function InvestigationReport({ data }: Props) {
       {visibleRecommendations.length > 0 && (
         <section className="rounded-2xl border border-slate-800 bg-[#101827] p-6">
           <div className="mb-5 flex items-center gap-3">
-            <ListChecks size={22} className="text-blue-400" />
+            <ListChecks
+              size={22}
+              className="text-blue-400"
+            />
             <h3 className="text-lg font-semibold">
               Recommended Actions
             </h3>
           </div>
 
           <div className="grid gap-3 lg:grid-cols-2">
-            {visibleRecommendations.map((action, index) => (
-              <div
-                key={index}
-                className="flex items-start gap-3 rounded-xl border border-slate-700/70 bg-[#111e31] p-4"
-              >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-blue-500/30 bg-blue-600/20 text-sm font-semibold text-blue-300">
-                  {index + 1}
-                </span>
-                <div className="min-w-0 pt-1">
-                  <Detail value={action} />
+            {visibleRecommendations.map(
+              (action, index) => (
+                <div
+                  key={index}
+                  className="flex items-start gap-3 rounded-xl border border-slate-700/70 bg-[#111e31] p-4"
+                >
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-blue-500/30 bg-blue-600/20 text-sm font-semibold text-blue-300">
+                    {index + 1}
+                  </span>
+
+                  <div className="min-w-0 pt-1">
+                    <Detail value={action} />
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            )}
           </div>
         </section>
       )}
@@ -689,7 +1052,10 @@ export default function InvestigationReport({ data }: Props) {
         <section className="rounded-2xl border border-slate-800 bg-[#101827] p-6 print:hidden">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <Activity size={21} className="text-purple-400" />
+              <Activity
+                size={21}
+                className="text-purple-400"
+              />
               <h3 className="text-lg font-semibold">
                 Agent Execution & Audit History
               </h3>
@@ -725,11 +1091,16 @@ export default function InvestigationReport({ data }: Props) {
         <div className="flex flex-wrap items-center justify-between gap-4">
           <button
             type="button"
-            onClick={() => setShowRaw((value) => !value)}
+            onClick={() =>
+              setShowRaw((value) => !value)
+            }
             aria-expanded={showRaw}
             className="flex items-center gap-3 text-left"
           >
-            <Code2 size={20} className="text-blue-400" />
+            <Code2
+              size={20}
+              className="text-blue-400"
+            />
             <span className="font-semibold">
               Technical JSON Response
             </span>
@@ -744,12 +1115,17 @@ export default function InvestigationReport({ data }: Props) {
           <button
             type="button"
             onClick={() =>
-              void copy(JSON.stringify(data, null, 2), "json")
+              void copy(
+                JSON.stringify(data, null, 2),
+                "json"
+              )
             }
             className="flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800"
           >
             <Clipboard size={16} />
-            {copied === "json" ? "Copied" : "Copy JSON"}
+            {copied === "json"
+              ? "Copied"
+              : "Copy JSON"}
           </button>
         </div>
 

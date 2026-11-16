@@ -1,7 +1,11 @@
 
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -9,7 +13,9 @@ import {
   BrainCircuit,
   Check,
   FileText,
+  Loader2,
   LockKeyhole,
+  RefreshCw,
   RotateCcw,
   Save,
   Settings2,
@@ -19,11 +25,12 @@ import {
 
 import Sidebar from "@/components/sidebar";
 import ProtectedRoute from "@/components/protected-route";
+import { useAuth } from "@/components/auth-provider";
 
 import {
   DEFAULT_SETTINGS,
-  loadSettings,
-  saveSettings,
+  getSettings,
+  updateSettings,
   type SecuritySettings,
 } from "@/lib/settings";
 
@@ -36,14 +43,9 @@ type ToggleProps = {
   title: string;
   description: string;
   checked: boolean;
-  onChange: (value: boolean) => void;
+  onChange?: (value: boolean) => void;
   disabled?: boolean;
 };
-
-const subscribe = () => () => {};
-
-const getClientSnapshot = () => true;
-const getServerSnapshot = () => false;
 
 function SettingToggle({
   title,
@@ -58,7 +60,6 @@ function SettingToggle({
         <h3 className="text-sm font-semibold text-white">
           {title}
         </h3>
-
         <p className="mt-1 text-xs leading-5 text-slate-400">
           {description}
         </p>
@@ -70,7 +71,7 @@ function SettingToggle({
         aria-checked={checked}
         aria-label={title}
         disabled={disabled}
-        onClick={() => onChange(!checked)}
+        onClick={() => onChange?.(!checked)}
         className={`relative h-7 w-12 shrink-0 rounded-full transition ${
           checked ? "bg-blue-600" : "bg-slate-700"
         } ${
@@ -89,49 +90,95 @@ function SettingToggle({
   );
 }
 
-function SettingsWorkspace() {
-  const isClient = useSyncExternalStore(
-    subscribe,
-    getClientSnapshot,
-    getServerSnapshot
-  );
-
-  if (!isClient) {
-    return (
-      <div className="min-h-screen bg-[#080d19] text-white">
-        <Sidebar />
-
-        <main className="min-h-screen px-5 pt-20 sm:px-8 lg:ml-64 lg:px-10 lg:pt-8">
-          <div className="rounded-2xl border border-slate-800 bg-[#101827] p-8 text-sm text-slate-400">
-            Loading system settings...
-          </div>
-        </main>
-      </div>
-    );
-  }
-
-  return <SettingsContent />;
-}
-
 function SettingsContent() {
-  const [settings, setSettings] = useState<SecuritySettings>(
-    () => loadSettings()
-  );
+  const { token } = useAuth();
 
+  const [settings, setSettings] =
+    useState<SecuritySettings>(DEFAULT_SETTINGS);
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const requestId = useRef(0);
+
+  useEffect(() => {
+    if (!token) return;
+
+    const id = ++requestId.current;
+    let active = true;
+
+    getSettings(token)
+      .then((result) => {
+        if (!active || id !== requestId.current) return;
+        setSettings(result);
+        setSaved(false);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        if (!active || id !== requestId.current) return;
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Unable to load settings."
+        );
+      })
+      .finally(() => {
+        if (active && id === requestId.current) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+      requestId.current += 1;
+    };
+  }, [token]);
+
+  async function handleRefresh() {
+    if (!token) return;
+
+    const id = ++requestId.current;
+    setLoading(true);
+    setError(null);
+
+    try {
+      const result = await getSettings(token);
+      if (id !== requestId.current) return;
+      setSettings(result);
+      setSaved(false);
+    } catch (err) {
+      if (id !== requestId.current) return;
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to load settings."
+      );
+    } finally {
+      if (id === requestId.current) {
+        setLoading(false);
+      }
+    }
+  }
 
   function updateBoolean(
     key: BooleanKey,
     value: boolean
   ) {
+    if (
+      key === "enableAuditLogging" ||
+      key === "enablePromptInjectionProtection"
+    ) {
+      return;
+    }
+
     setSettings((current) => ({
       ...current,
       [key]: value,
     }));
 
     setSaved(false);
-    setSaveError(null);
   }
 
   function updateSetting<K extends keyof SecuritySettings>(
@@ -144,26 +191,58 @@ function SettingsContent() {
     }));
 
     setSaved(false);
-    setSaveError(null);
   }
 
-  function handleSave() {
+  async function handleSave() {
+    if (!token) {
+      setError("You must be logged in.");
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+
     try {
-      saveSettings(settings);
-      setSaved(true);
-      setSaveError(null);
-    } catch {
-      setSaveError(
-        "Unable to save settings in this browser."
+      const result = await updateSettings(
+        token,
+        settings
       );
-      setSaved(false);
+
+      setSettings(result);
+      setSaved(true);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to save settings."
+      );
+    } finally {
+      setSaving(false);
     }
   }
 
   function handleReset() {
     setSettings({ ...DEFAULT_SETTINGS });
     setSaved(false);
-    setSaveError(null);
+    setError(null);
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#080d19] text-white">
+        <Sidebar />
+        <main className="min-h-screen px-5 pt-20 sm:px-8 lg:ml-64 lg:px-10 lg:pt-8">
+          <div className="flex items-center gap-3 rounded-2xl border border-slate-800 bg-[#101827] p-8 text-slate-400">
+            <Loader2
+              size={20}
+              className="animate-spin text-blue-400"
+            />
+            Loading settings from PostgreSQL...
+          </div>
+        </main>
+      </div>
+    );
   }
 
   return (
@@ -190,10 +269,9 @@ function SettingsContent() {
                 <h1 className="text-3xl font-bold tracking-tight">
                   System Settings
                 </h1>
-
                 <p className="mt-2 text-sm text-slate-400">
-                  Configure investigation preferences and review
-                  planned agent controls.
+                  Manage investigation preferences stored
+                  securely in your account.
                 </p>
               </div>
             </div>
@@ -201,8 +279,19 @@ function SettingsContent() {
             <div className="flex flex-wrap gap-3">
               <button
                 type="button"
+                onClick={() => void handleRefresh()}
+                disabled={saving}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-700 px-4 py-2.5 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+              >
+                <RefreshCw size={16} />
+                Refresh
+              </button>
+
+              <button
+                type="button"
                 onClick={handleReset}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-700 px-4 py-2.5 text-sm text-slate-300 transition hover:bg-slate-800"
+                disabled={saving}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-700 px-4 py-2.5 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-50"
               >
                 <RotateCcw size={16} />
                 Reset
@@ -210,90 +299,91 @@ function SettingsContent() {
 
               <button
                 type="button"
-                onClick={handleSave}
-                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-blue-500"
+                onClick={() => void handleSave()}
+                disabled={saving || !token || loading}
+                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
               >
-                {saved ? (
+                {saving ? (
+                  <Loader2
+                    size={17}
+                    className="animate-spin"
+                  />
+                ) : saved ? (
                   <Check size={17} />
                 ) : (
                   <Save size={17} />
                 )}
 
-                {saved
-                  ? "Saved Locally"
-                  : "Save Preferences"}
+                {saving
+                  ? "Saving..."
+                  : saved
+                    ? "Saved"
+                    : "Save Preferences"}
               </button>
             </div>
           </div>
         </header>
 
         <div className="mt-6 rounded-xl border border-blue-500/25 bg-blue-500/5 p-4 text-sm leading-6 text-blue-200">
-          Configuration preview: these preferences are stored
-          only in this browser. They do not currently enable,
-          disable, or enforce backend security features.
+          Preferences are saved in PostgreSQL for your
+          authenticated account. Mandatory security controls
+          cannot be changed from this page.
         </div>
 
-        {saveError && (
-          <p
+        {error && (
+          <div
             role="alert"
-            className="mt-4 text-sm text-red-400"
+            className="mt-5 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300"
           >
-            {saveError}
-          </p>
+            {error}
+            <button
+              type="button"
+              onClick={() => void handleRefresh()}
+              className="ml-3 font-semibold underline"
+            >
+              Retry
+            </button>
+          </div>
         )}
 
         <div className="mt-7 grid gap-6 xl:grid-cols-2">
           <section className="rounded-2xl border border-slate-800 bg-[#101827] p-6">
             <div className="flex items-center gap-3 border-b border-slate-800 pb-5">
-              <Bot
-                size={22}
-                className="text-blue-400"
-              />
-
+              <Bot size={22} className="text-blue-400" />
               <div>
                 <h2 className="text-lg font-semibold">
                   Agent Configuration
                 </h2>
-
                 <p className="mt-1 text-xs text-slate-400">
-                  Planned multi-agent orchestration controls
+                  Investigation agent preferences
                 </p>
               </div>
             </div>
 
             <SettingToggle
               title="Security Analysis Agent"
-              description="Preference for security event analysis and threat correlation."
+              description="Enable the security analysis agent preference."
               checked={settings.enableSecurityAgent}
               onChange={(value) =>
-                updateBoolean(
-                  "enableSecurityAgent",
-                  value
-                )
+                updateBoolean("enableSecurityAgent", value)
               }
             />
 
             <SettingToggle
               title="RAG Knowledge Agent"
-              description="Preference for retrieval-augmented investigation context."
+              description="Enable retrieval-augmented investigation context."
               checked={settings.enableRagAgent}
               onChange={(value) =>
-                updateBoolean(
-                  "enableRagAgent",
-                  value
-                )
+                updateBoolean("enableRagAgent", value)
               }
             />
 
             <SettingToggle
               title="Report Generation Agent"
-              description="Preference for structured investigation report generation."
+              description="Enable structured report generation preference."
               checked={settings.enableReportAgent}
               onChange={(value) =>
-                updateBoolean(
-                  "enableReportAgent",
-                  value
-                )
+                updateBoolean("enableReportAgent", value)
               }
             />
           </section>
@@ -304,53 +394,38 @@ function SettingsContent() {
                 size={22}
                 className="text-emerald-400"
               />
-
               <div>
                 <h2 className="text-lg font-semibold">
                   Security Controls
                 </h2>
-
                 <p className="mt-1 text-xs text-slate-400">
-                  Planned backend-enforced protections
+                  Mandatory protections and review preferences
                 </p>
               </div>
             </div>
 
             <SettingToggle
               title="Prompt Injection Protection"
-              description="Requested protection against untrusted instructions in retrieved content."
+              description="Mandatory backend security policy. Cannot be disabled."
               checked={
                 settings.enablePromptInjectionProtection
               }
-              onChange={(value) =>
-                updateBoolean(
-                  "enablePromptInjectionProtection",
-                  value
-                )
-              }
+              disabled
             />
 
             <SettingToggle
               title="Audit Logging"
-              description="Requested recording of investigation and agent execution events."
+              description="Mandatory backend security policy. Cannot be disabled."
               checked={settings.enableAuditLogging}
-              onChange={(value) =>
-                updateBoolean(
-                  "enableAuditLogging",
-                  value
-                )
-              }
+              disabled
             />
 
             <SettingToggle
               title="Human Review"
-              description="Preference to require analyst review before final approval."
+              description="Require analyst review before final approval (preference)."
               checked={settings.requireHumanReview}
               onChange={(value) =>
-                updateBoolean(
-                  "requireHumanReview",
-                  value
-                )
+                updateBoolean("requireHumanReview", value)
               }
             />
           </section>
@@ -361,14 +436,12 @@ function SettingsContent() {
                 size={22}
                 className="text-purple-400"
               />
-
               <div>
                 <h2 className="text-lg font-semibold">
                   Investigation Preferences
                 </h2>
-
                 <p className="mt-1 text-xs text-slate-400">
-                  Defaults for future backend integration
+                  Saved configuration for future investigations
                 </p>
               </div>
             </div>
@@ -384,9 +457,7 @@ function SettingsContent() {
 
                 <select
                   id="severity-threshold"
-                  value={
-                    settings.defaultSeverityThreshold
-                  }
+                  value={settings.defaultSeverityThreshold}
                   onChange={(event) =>
                     updateSetting(
                       "defaultSeverityThreshold",
@@ -398,9 +469,7 @@ function SettingsContent() {
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
                   <option value="high">High</option>
-                  <option value="critical">
-                    Critical
-                  </option>
+                  <option value="critical">Critical</option>
                 </select>
               </div>
 
@@ -417,14 +486,9 @@ function SettingsContent() {
                   type="number"
                   min={1}
                   max={10000}
-                  value={
-                    settings.maxInvestigationEvents
-                  }
+                  value={settings.maxInvestigationEvents}
                   onChange={(event) => {
-                    const value = Number(
-                      event.target.value
-                    );
-
+                    const value = Number(event.target.value);
                     if (
                       Number.isInteger(value) &&
                       value >= 1 &&
@@ -442,15 +506,10 @@ function SettingsContent() {
 
               <SettingToggle
                 title="Automatic Report Generation"
-                description="Preference to generate reports after an investigation."
-                checked={
-                  settings.autoGenerateReport
-                }
+                description="Automatically generate a report after investigation (preference)."
+                checked={settings.autoGenerateReport}
                 onChange={(value) =>
-                  updateBoolean(
-                    "autoGenerateReport",
-                    value
-                  )
+                  updateBoolean("autoGenerateReport", value)
                 }
               />
             </div>
@@ -462,48 +521,25 @@ function SettingsContent() {
                 size={22}
                 className="text-blue-400"
               />
-
               <div>
                 <h2 className="text-lg font-semibold">
                   System Information
                 </h2>
-
                 <p className="mt-1 text-xs text-slate-400">
-                  Development environment
+                  SecureAgent AI development environment
                 </p>
               </div>
             </div>
 
             <div className="mt-5 space-y-4">
               {[
-                [
-                  "Application",
-                  "SecureAgent AI",
-                ],
-                [
-                  "Frontend",
-                  "Next.js / React / TypeScript",
-                ],
-                [
-                  "Backend",
-                  "FastAPI / Python",
-                ],
-                [
-                  "Database",
-                  "PostgreSQL",
-                ],
-                [
-                  "Authentication",
-                  "JWT",
-                ],
-                [
-                  "AI Architecture",
-                  "Multi-Agent + RAG",
-                ],
-                [
-                  "Environment",
-                  "Development",
-                ],
+                ["Application", "SecureAgent AI"],
+                ["Frontend", "Next.js / React / TypeScript"],
+                ["Backend", "FastAPI / Python"],
+                ["Database", "PostgreSQL"],
+                ["Authentication", "JWT"],
+                ["AI Architecture", "Multi-Agent + RAG"],
+                ["Configuration", "Authenticated PostgreSQL API"],
               ].map(([label, value]) => (
                 <div
                   key={label}
@@ -512,7 +548,6 @@ function SettingsContent() {
                   <span className="text-slate-400">
                     {label}
                   </span>
-
                   <span className="font-medium text-slate-200">
                     {value}
                   </span>
@@ -525,11 +560,10 @@ function SettingsContent() {
                 size={20}
                 className="shrink-0 text-emerald-400"
               />
-
               <p className="text-xs leading-6 text-slate-400">
-                Backend authentication and security controls
-                remain independent of these browser
-                preferences.
+                Settings are scoped to the authenticated user.
+                Security-critical protections are not
+                user-configurable.
               </p>
             </div>
           </section>
@@ -560,7 +594,7 @@ function SettingsContent() {
 export default function SettingsPage() {
   return (
     <ProtectedRoute>
-      <SettingsWorkspace />
+      <SettingsContent />
     </ProtectedRoute>
   );
 }

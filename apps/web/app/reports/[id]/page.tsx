@@ -14,13 +14,18 @@ import {
 import Sidebar from "@/components/sidebar";
 import ProtectedRoute from "@/components/protected-route";
 import InvestigationReport from "@/components/investigation-report";
+import InvestigationReviewPanel from "@/components/investigation-review";
+
 import { useAuth } from "@/components/auth-provider";
 import { apiRequest } from "@/lib/api";
 
+
 type ReportData = Record<string, unknown>;
+
 
 function SavedReportPage() {
   const { token } = useAuth();
+
   const params = useParams<{ id: string }>();
   const id = params.id;
 
@@ -31,8 +36,11 @@ function SavedReportPage() {
     error: string | null;
   } | null>(null);
 
+
   useEffect(() => {
-    if (!token || !id) return;
+    if (!token || !id) {
+      return;
+    }
 
     let cancelled = false;
 
@@ -74,11 +82,13 @@ function SavedReportPage() {
     };
   }, [token, id]);
 
+
   const current =
     reportState?.token === token &&
     reportState?.id === id
       ? reportState
       : null;
+
 
   return (
     <div className="min-h-screen bg-[#080d19] text-white">
@@ -87,11 +97,12 @@ function SavedReportPage() {
       <main className="min-h-screen px-5 pb-12 pt-20 sm:px-8 lg:ml-64 lg:px-10 lg:pt-8">
         <Link
           href="/"
-          className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-white"
+          className="inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white"
         >
           <ArrowLeft size={16} />
           Back to Dashboard
         </Link>
+
 
         <div className="mt-7">
           {!current ? (
@@ -111,13 +122,24 @@ function SavedReportPage() {
               {current.error}
             </div>
           ) : current.data ? (
-            <InvestigationReport data={current.data} />
+            <>
+              <InvestigationReport data={current.data} />
+
+              {token && id && (
+                <InvestigationReviewPanel
+                  key={`${id}:${token}`}
+                  investigationId={id}
+                  token={token}
+                />
+              )}
+            </>
           ) : null}
         </div>
       </main>
     </div>
   );
 }
+
 
 export default function ReportPage() {
   return (
