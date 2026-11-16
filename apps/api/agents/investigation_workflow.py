@@ -1,7 +1,7 @@
 
 from datetime import datetime, timezone
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from apps.api.agents.security_tools import (
     create_security_tool_registry,
@@ -39,17 +39,27 @@ class InvestigationWorkflow:
         granted_permissions: set[str],
         investigation_id: str | None = None,
     ) -> dict:
+
         if not isinstance(events, list):
             raise ValueError("Events must be a list")
 
         if len(events) > 1000:
-            raise ValueError("Maximum 1000 events allowed")
+            raise ValueError(
+                "Maximum 1000 events allowed"
+            )
 
-        if not isinstance(granted_permissions, set):
-            raise ValueError("Invalid permissions")
+        if not isinstance(
+            granted_permissions, set
+        ):
+            raise ValueError(
+                "Invalid permissions"
+            )
 
-        # Fail closed before sending a request to the LLM.
-        if "security:read" not in granted_permissions:
+        # Fail closed before calling the LLM.
+        if (
+            "security:read"
+            not in granted_permissions
+        ):
             raise PermissionError(
                 "Missing security:read permission"
             )
@@ -57,15 +67,24 @@ class InvestigationWorkflow:
         if investigation_id is None:
             investigation_id = str(uuid4())
         else:
-            from uuid import UUID
-
-            if not isinstance(investigation_id, str):
-                raise ValueError("Invalid investigation_id")
+            if not isinstance(
+                investigation_id, str
+            ):
+                raise ValueError(
+                    "Invalid investigation_id"
+                )
 
             try:
-                investigation_id = str(UUID(investigation_id))
-            except (ValueError, AttributeError) as exc:
-                raise ValueError("Invalid investigation_id") from exc
+                investigation_id = str(
+                    UUID(investigation_id)
+                )
+            except (
+                ValueError,
+                AttributeError,
+            ) as exc:
+                raise ValueError(
+                    "Invalid investigation_id"
+                ) from exc
 
         first_tool = select_security_tool(
             request=request,
@@ -87,7 +106,9 @@ class InvestigationWorkflow:
         ]
 
         if first_tool not in available_tools:
-            raise ValueError("Invalid tool selection")
+            raise ValueError(
+                "Invalid tool selection"
+            )
 
         ordered_tools = [
             first_tool,
@@ -102,19 +123,24 @@ class InvestigationWorkflow:
         results = {}
 
         for step_number, tool_name in enumerate(
-            ordered_tools, start=1
+            ordered_tools,
+            start=1,
         ):
             if tool_name == "analyze_security_logs":
-                arguments = {"events": events}
+                arguments = {
+                    "events": events,
+                }
             else:
                 arguments = {
                     "total_events": len(events),
                     "failed_logins": sum(
                         1
                         for event in events
-                        if isinstance(event, dict)
-                        and event.get("event_type")
-                        == "login_failure"
+                        if (
+                            isinstance(event, dict)
+                            and event.get("event_type")
+                            == "login_failure"
+                        )
                     ),
                 }
 
@@ -132,8 +158,13 @@ class InvestigationWorkflow:
                 "status": "completed",
             })
 
-        analysis = results["analyze_security_logs"]
-        statistics = results["summarize_log_statistics"]
+        analysis = results[
+            "analyze_security_logs"
+        ]
+
+        statistics = dict(
+            results["summarize_log_statistics"]
+        )
 
         severity_order = {
             "low": 1,
@@ -149,21 +180,52 @@ class InvestigationWorkflow:
                 finding["severity"]
                 for finding in findings
             ),
-            key=lambda value: severity_order[value],
+            key=lambda value: (
+                severity_order[value]
+            ),
             default="low",
+        )
+
+        # Preserve the statistics tool's independent
+        # indicator while exposing a finding-aware
+        # overall risk indicator.
+        statistics["statistical_risk_indicator"] = (
+            statistics.get("risk_indicator")
+        )
+
+        statistics["risk_indicator"] = (
+            "elevated"
+            if severity in {
+                "medium",
+                "high",
+                "critical",
+            }
+            else "not_elevated"
+        )
+
+        statistics["finding_based_severity"] = (
+            severity
         )
 
         report = {
             "summary": (
-                f"Analyzed {analysis['total_events']} "
+                f"Analyzed "
+                f"{analysis['total_events']} "
                 f"security events and identified "
-                f"{analysis['finding_count']} findings."
+                f"{analysis['finding_count']} "
+                f"findings."
             ),
             "severity": severity,
             "findings": findings,
-            "authentication_statistics": statistics,
-            "event_counts": analysis["event_counts"],
-            "evidence_source": "supplied_security_events",
+            "authentication_statistics": (
+                statistics
+            ),
+            "event_counts": (
+                analysis["event_counts"]
+            ),
+            "evidence_source": (
+                "supplied_security_events"
+            ),
             "generated_at": datetime.now(
                 timezone.utc
             ).isoformat(),

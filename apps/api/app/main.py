@@ -23,18 +23,32 @@ from apps.api.app.security import (
     hash_password,
     verify_password,
 )
-from apps.api.routes.chat import router as chat_router
+
+# Register ORM models before database initialization.
 from apps.api.rag import models as rag_models  # noqa: F401
+from apps.api.agents import audit_models  # noqa: F401
 
-from apps.api.routes.documents import router as documents_router
+# Existing API routers.
+from apps.api.routes.chat import router as chat_router
+from apps.api.routes.documents import (
+    router as documents_router,
+)
+from apps.api.routes.retrieval import (
+    router as retrieval_router,
+)
+from apps.api.routes.rag_chat import (
+    router as rag_chat_router,
+)
 
-from apps.api.routes.retrieval import router as retrieval_router
+# Phase 5: Secure investigation API.
+from apps.api.routes.investigations import (
+    router as investigations_router,
+)
 
-from apps.api.routes.rag_chat import router as rag_chat_router
 
-
+# ============================================================
 # Application Lifespan
-
+# ============================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -48,9 +62,9 @@ async def lifespan(app: FastAPI):
     yield
 
 
-
+# ============================================================
 # FastAPI Application
-
+# ============================================================
 
 app = FastAPI(
     title="SecureAgent AI API",
@@ -58,14 +72,14 @@ app = FastAPI(
         "SecureAgent AI is a secure AI-powered "
         "cybersecurity research and investigation platform."
     ),
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
 
-
+# ============================================================
 # CORS Configuration
-
+# ============================================================
 
 settings = get_settings()
 
@@ -85,9 +99,9 @@ app.add_middleware(
 )
 
 
-
+# ============================================================
 # Health Check
-
+# ============================================================
 
 @app.get("/health", tags=["System"])
 def health():
@@ -97,12 +111,14 @@ def health():
     }
 
 
-
+# ============================================================
 # Readiness Check
-
+# ============================================================
 
 @app.get("/ready", tags=["System"])
-def ready(db: Session = Depends(get_db)):
+def ready(
+    db: Session = Depends(get_db),
+):
     """
     Check PostgreSQL and Redis connectivity.
     """
@@ -131,9 +147,9 @@ def ready(db: Session = Depends(get_db)):
     }
 
 
-
+# ============================================================
 # User Registration
-
+# ============================================================
 
 @app.post(
     "/auth/register",
@@ -170,9 +186,9 @@ def register(
     return user
 
 
-
+# ============================================================
 # User Login
-
+# ============================================================
 
 @app.post(
     "/auth/login",
@@ -206,9 +222,9 @@ def login(
     )
 
 
-
+# ============================================================
 # Current Authenticated User
-
+# ============================================================
 
 @app.get(
     "/auth/me",
@@ -224,11 +240,19 @@ def me(
     return user
 
 
+# ============================================================
+# Register API Routers
+# ============================================================
 
-# Phase 2: AI Chat Routes
-
-
+# AI chat
 app.include_router(chat_router)
+
+# Document management
 app.include_router(documents_router)
+
+# RAG retrieval and chat
 app.include_router(retrieval_router)
 app.include_router(rag_chat_router)
+
+# Phase 5: Agentic cybersecurity investigations
+app.include_router(investigations_router)
