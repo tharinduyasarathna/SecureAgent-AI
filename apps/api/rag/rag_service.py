@@ -33,12 +33,14 @@ async def answer_with_rag(
     user_id: int,
     question: str,
     top_k: int = 5,
+    document_id: int | None = None,
 ):
     results = await retrieve_chunks(
         db=db,
         user_id=user_id,
         query=question,
         top_k=top_k,
+        document_id=document_id,
     )
 
     if not results:

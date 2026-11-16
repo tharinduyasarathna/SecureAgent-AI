@@ -18,6 +18,10 @@ router = APIRouter(
 class RAGQuestion(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     top_k: int = Field(default=5, ge=1, le=10)
+    document_id: int | None = Field(
+        default=None,
+        ge=1,
+    )
 
 
 @router.post("/ask")
@@ -37,4 +41,5 @@ async def ask_rag(
         user_id=user.id,
         question=request.question,
         top_k=request.top_k,
+        document_id=request.document_id,
     )

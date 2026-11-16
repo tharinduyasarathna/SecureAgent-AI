@@ -11,6 +11,7 @@ async def retrieve_chunks(
     user_id: int,
     query: str,
     top_k: int = 5,
+    document_id: int | None = None,
 ) -> list[dict]:
     """
     Retrieve semantically similar document chunks
@@ -24,6 +25,10 @@ async def retrieve_chunks(
         raise ValueError("top_k must be between 1 and 10")
 
     query_embedding = await generate_embedding(query)
+
+    distance = RAGChunk.embedding.cosine_distance(
+        query_embedding
+    )
 
     distance = RAGChunk.embedding.cosine_distance(
         query_embedding
@@ -43,6 +48,15 @@ async def retrieve_chunks(
             RAGChunk.document_id == RAGDocument.id,
         )
         .where(RAGDocument.owner_id == user_id)
+    )
+
+    if document_id is not None:
+        statement = statement.where(
+            RAGDocument.id == document_id
+        )
+
+    statement = (
+        statement
         .order_by(distance)
         .limit(top_k)
     )
