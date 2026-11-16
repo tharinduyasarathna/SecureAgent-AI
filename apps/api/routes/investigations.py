@@ -3,7 +3,7 @@ import logging
 import os
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from openai import OpenAI
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -12,6 +12,11 @@ from apps.api.agents.audit_service import AuditService
 from apps.api.agents.secure_investigation import (
     SecureInvestigationWorkflow,
 )
+from apps.api.agents.investigation_report_service import (
+    InvestigationReportService,
+)
+from apps.api.agents import investigation_report_models
+
 from apps.api.app.auth_dependencies import get_current_user
 from apps.api.app.database import get_db
 from apps.api.app.models import User
@@ -25,69 +30,40 @@ router = APIRouter(
 )
 
 
-# ============================================================
-# Request Schema
-# ============================================================
-
 class InvestigationRequest(BaseModel):
     request: str = Field(
         min_length=1,
         max_length=2000,
-        description="Security investigation instructions",
     )
 
     events: list[dict] = Field(
         default_factory=list,
         max_length=1000,
-        description="Security events to investigate",
     )
 
     top_k: int = Field(
         default=5,
         ge=1,
         le=5,
-        description="Maximum number of RAG evidence results",
     )
 
     document_id: int | None = Field(
         default=None,
         ge=1,
-        description="Optional document ID for scoped retrieval",
     )
 
-
-# ============================================================
-# Authorization
-# ============================================================
 
 def get_investigation_permissions(
     user: User = Depends(get_current_user),
 ) -> set[str]:
-    """
-    Initial single-role application policy.
-
-    Authenticated users may investigate submitted security
-    events and retrieve their own RAG documents.
-
-    Replace this with role-based authorization when
-    introducing multiple privilege levels.
-    """
     return {"security:read"}
 
-
-# ============================================================
-# Workflow Dependency
-# ============================================================
 
 def get_investigation_workflow():
     api_key = os.getenv("OPENAI_API_KEY")
     model = os.getenv("OPENAI_MODEL")
 
     if not api_key or not model:
-        logger.error(
-            "Investigation AI configuration missing"
-        )
-
         raise HTTPException(
             status_code=503,
             detail="AI service is not configured",
@@ -105,9 +81,23 @@ def get_investigation_workflow():
     )
 
 
-# ============================================================
-# Create Investigation
-# ============================================================
+def validate_investigation_id(investigation_id: str) -> str:
+    try:
+        canonical = str(UUID(investigation_id))
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid investigation ID",
+        ) from None
+
+    if canonical != investigation_id:
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid investigation ID",
+        )
+
+    return canonical
+
 
 @router.post("")
 async def create_investigation(
@@ -121,28 +111,11 @@ async def create_investigation(
         get_investigation_workflow
     ),
 ):
-    """
-    Execute an AI-powered security investigation.
-
-    Steps:
-    1. Authenticate the user.
-    2. Apply server-side security permissions.
-    3. Run the secure investigation workflow.
-    4. Execute approved security tools and RAG retrieval.
-    5. Synthesize evidence.
-    6. Return investigation findings and audit metadata.
-    """
-
     if not payload.request.strip():
         raise HTTPException(
             status_code=422,
             detail="Investigation request cannot be empty",
         )
-
-    logger.info(
-        "Starting security investigation for user_id=%s",
-        user.id,
-    )
 
     try:
         result = await workflow.run(
@@ -155,73 +128,130 @@ async def create_investigation(
             document_id=payload.document_id,
         )
 
-        logger.info(
-            "Investigation finished: id=%s status=%s",
-            result.get("investigation_id"),
-            result.get("status"),
-        )
-
-        return result
-
     except PermissionError:
-        logger.warning(
-            "Investigation authorization denied for user_id=%s",
-            user.id,
-        )
-
         raise HTTPException(
             status_code=403,
             detail="Investigation access denied",
         ) from None
 
     except ValueError:
-        logger.exception(
-            "Investigation validation failed for user_id=%s",
-            user.id,
-        )
-
+        logger.exception("Invalid investigation input")
         raise HTTPException(
             status_code=422,
             detail="Invalid investigation input",
         ) from None
 
     except Exception:
-        logger.exception(
-            "Security investigation failed for user_id=%s",
-            user.id,
-        )
-
+        logger.exception("Investigation workflow failed")
         raise HTTPException(
             status_code=500,
             detail="Investigation could not be completed",
         ) from None
 
+    if (
+        result.get("status") == "completed"
+        and isinstance(result.get("structured_report"), dict)
+    ):
+        try:
+            service = InvestigationReportService(db)
 
-# ============================================================
-# Investigation History
-# ============================================================
+            service.save(
+                investigation_id=result["investigation_id"],
+                user_id=user.id,
+                structured_report=result["structured_report"],
+            )
+
+        except Exception:
+            logger.exception(
+                "Failed to persist investigation report %s",
+                result.get("investigation_id"),
+            )
+
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Investigation completed, but report "
+                    "persistence failed"
+                ),
+            ) from None
+
+    logger.info(
+        "Investigation finished: id=%s status=%s",
+        result.get("investigation_id"),
+        result.get("status"),
+    )
+
+    return result
+
+
+@router.get("/reports")
+def list_investigation_reports(
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        service = InvestigationReportService(db)
+
+        return service.list_reports(
+            user_id=user.id,
+            limit=limit,
+            offset=offset,
+        )
+
+    except Exception:
+        logger.exception("Failed to list investigation reports")
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to list investigation reports",
+        ) from None
+
+
+@router.get("/{investigation_id}/report")
+def get_investigation_report(
+    investigation_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    canonical_id = validate_investigation_id(
+        investigation_id
+    )
+
+    try:
+        service = InvestigationReportService(db)
+
+        report = service.get(
+            investigation_id=canonical_id,
+            user_id=user.id,
+        )
+
+    except Exception:
+        logger.exception("Failed to retrieve investigation report")
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to retrieve investigation report",
+        ) from None
+
+    if report is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Investigation report not found",
+        )
+
+    return report
+
 
 @router.get("/{investigation_id}")
 def get_investigation_history(
     investigation_id: str,
     user: User = Depends(get_current_user),
 ):
-    """
-    Retrieve the audit history of an investigation
-    belonging to the authenticated user.
-    """
-
-    try:
-        canonical_id = str(UUID(investigation_id))
-
-        if canonical_id != investigation_id:
-            raise ValueError("Noncanonical UUID")
-
-    except (ValueError, AttributeError):
-        raise HTTPException(
-            status_code=422,
-            detail="Invalid investigation ID",
-        ) from None
+    canonical_id = validate_investigation_id(
+        investigation_id
+    )
 
     try:
         history = AuditService().get_history(
@@ -230,9 +260,7 @@ def get_investigation_history(
         )
 
     except Exception:
-        logger.exception(
-            "Failed to retrieve investigation history"
-        )
+        logger.exception("Failed to retrieve investigation history")
 
         raise HTTPException(
             status_code=500,
