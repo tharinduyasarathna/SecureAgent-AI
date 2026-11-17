@@ -2,7 +2,7 @@
 from contextlib import asynccontextmanager
 
 import redis
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
@@ -12,6 +12,10 @@ from apps.api.app.auth_dependencies import get_current_user
 from apps.api.app.config import get_settings
 from apps.api.app.database import Base, engine, get_db
 from apps.api.app.models import User
+from apps.api.app.rate_limit import (
+    limit_login,
+    limit_registration,
+)
 from apps.api.app.schemas import (
     Credentials,
     LoginCredentials,
@@ -65,11 +69,9 @@ from apps.api.routes.reports import (
     router as reports_router,
 )
 
-
 from apps.api.routes.document_events import (
     router as document_events_router,
 )
-
 
 
 # ============================================================
@@ -185,11 +187,14 @@ def ready(
 )
 def register(
     data: Credentials,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """
-    Register a new user.
+    Register a new user with Redis-backed rate limiting.
     """
+    limit_registration(request)
+
     user = User(
         email=str(data.email).lower(),
         password_hash=hash_password(data.password),
@@ -223,11 +228,17 @@ def register(
 )
 def login(
     data: LoginCredentials,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """
-    Authenticate a user and return a JWT token.
+    Authenticate a user with Redis-backed rate limiting.
     """
+    limit_login(
+        request,
+        str(data.email),
+    )
+
     user = db.scalar(
         select(User).where(
             User.email == str(data.email).lower()
@@ -292,6 +303,5 @@ app.include_router(reviews_router)
 # Phase 7.7: Secure PDF and JSON report exports
 app.include_router(reports_router)
 
-
+# Document event extraction
 app.include_router(document_events_router)
-

@@ -49,11 +49,15 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      APP_ENV: development
+      APP_ENV: ${APP_ENV:-production}
       DATABASE_URL: postgresql+psycopg://secureagent:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/secureagent
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      JWT_ALGORITHM: HS256
+      TOKEN_MINUTES: ${TOKEN_MINUTES:-60}
       CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
+      OPENAI_MODEL: ${OPENAI_MODEL:?Set OPENAI_MODEL in .env}
     ports:
       - "127.0.0.1:8766:8000"
     depends_on:
