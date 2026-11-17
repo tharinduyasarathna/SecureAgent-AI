@@ -10,6 +10,17 @@ The platform is designed around a principle of **human oversight of AI-generated
 
 ![SecureAgent AI Architecture](docs/images/secureagent-architecture.png)
 
+
+## 🎬 SecureAgent AI — Application Demo
+
+Watch SecureAgent AI in action, demonstrating its
+cybersecurity investigation and AI-powered workflows.
+
+![SecureAgent AI Demo](docs/demo/secureagent-preview-50s.gif)
+
+**Demo duration:** 50 seconds (fast-forwarded)
+
+
 ## Key Features
 
 ### AI-Powered Cybersecurity Investigations
