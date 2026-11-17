@@ -1,0 +1,119 @@
+{
+    "properties":  {
+                       "configuration":  {
+                                             "registries":  [
+                                                                {
+                                                                    "identity":  "",
+                                                                    "passwordSecretRef":  "ghcrio-tharinduyasarathna",
+                                                                    "server":  "ghcr.io",
+                                                                    "username":  "tharinduyasarathna"
+                                                                }
+                                                            ],
+                                             "ingress":  {
+                                                             "external":  true,
+                                                             "transport":  "auto",
+                                                             "targetPort":  8000
+                                                         },
+                                             "secrets":  [
+                                                             {
+                                                                 "name":  "database-url"
+                                                             },
+                                                             {
+                                                                 "name":  "ghcrio-tharinduyasarathna"
+                                                             },
+                                                             {
+                                                                 "name":  "jwt-secret"
+                                                             },
+                                                             {
+                                                                 "name":  "openai-key"
+                                                             }
+                                                         ]
+                                         },
+                       "template":  {
+                                        "containers":  [
+                                                           {
+                                                               "env":  [
+                                                                           {
+                                                                               "name":  "APP_ENV",
+                                                                               "value":  "production"
+                                                                           },
+                                                                           {
+                                                                               "name":  "JWT_SECRET",
+                                                                               "secretRef":  "jwt-secret"
+                                                                           },
+                                                                           {
+                                                                               "name":  "JWT_ALGORITHM",
+                                                                               "value":  "HS256"
+                                                                           },
+                                                                           {
+                                                                               "name":  "TOKEN_MINUTES",
+                                                                               "value":  "60"
+                                                                           },
+                                                                           {
+                                                                               "name":  "OPENAI_API_KEY",
+                                                                               "secretRef":  "openai-key"
+                                                                           },
+                                                                           {
+                                                                               "name":  "OPENAI_MODEL",
+                                                                               "value":  "gpt-6-luna"
+                                                                           },
+                                                                           {
+                                                                               "secretRef":  "database-url",
+                                                                               "name":  "DATABASE_URL"
+                                                                           },
+                                                                           {
+                                                                               "value":  "redis://127.0.0.1:6379/0",
+                                                                               "name":  "REDIS_URL"
+                                                                           }
+                                                                       ],
+                                                               "image":  "ghcr.io/tharinduyasarathna/secureagent-ai-api:demo",
+                                                               "imageType":  "ContainerImage",
+                                                               "name":  "secureagent-api",
+                                                               "resources":  {
+                                                                                 "cpu":  0.5,
+                                                                                 "ephemeralStorage":  "2Gi",
+                                                                                 "memory":  "1Gi"
+                                                                             }
+                                                           },
+                                                           {
+                                                               "env":  [
+                                                                           {
+                                                                               "name":  "POSTGRES_USER",
+                                                                               "value":  "secureagent"
+                                                                           },
+                                                                           {
+                                                                               "name":  "POSTGRES_DB",
+                                                                               "value":  "secureagent"
+                                                                           },
+                                                                           {
+                                                                               "name":  "POSTGRES_PASSWORD",
+                                                                               "secretRef":  "postgres-password"
+                                                                           }
+                                                                       ],
+                                                               "image":  "pgvector/pgvector:pg16",
+                                                               "imageType":  "ContainerImage",
+                                                               "name":  "postgres",
+                                                               "resources":  {
+                                                                                 "cpu":  0.5,
+                                                                                 "ephemeralStorage":  "2Gi",
+                                                                                 "memory":  "1Gi"
+                                                                             }
+                                                           },
+                                                           {
+                                                               "name":  "redis",
+                                                               "resources":  {
+                                                                                 "cpu":  0.25,
+                                                                                 "memory":  "0.5Gi"
+                                                                             },
+                                                               "image":  "redis:7-alpine"
+                                                           }
+                                                       ],
+                                        "scale":  {
+                                                      "maxReplicas":  1,
+                                                      "minReplicas":  1
+                                                  }
+                                    },
+                       "managedEnvironmentId":  "/subscriptions/c67a2e09-9108-486c-bfdc-430573fb5ded/resourceGroups/rg-secureagent-demo/providers/Microsoft.App/managedEnvironments/cae-secureagent-demo"
+                   },
+    "location":  "northeurope"
+}
