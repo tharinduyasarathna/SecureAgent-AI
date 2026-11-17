@@ -1,0 +1,5 @@
+
+subscription_id = "YOUR_AZURE_SUBSCRIPTION_ID"
+project_name    = "secureagent-ai"
+environment     = "prod"
+location        = "northeurope"
