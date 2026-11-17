@@ -1,5 +1,34 @@
 
+# ============================================================
+# SecureAgent AI - Example Terraform Variables
+# ============================================================
+
+# Replace with your Azure subscription ID.
 subscription_id = "YOUR_AZURE_SUBSCRIPTION_ID"
-project_name    = "secureagent-ai"
-environment     = "prod"
-location        = "northeurope"
+
+project_name = "secureagent-ai"
+
+environment = "dev"
+
+location = "northeurope"
+
+tags = {
+  Project   = "SecureAgent-AI"
+  ManagedBy = "Terraform"
+  Owner     = "SecureAgent-Team"
+}
+
+# Disabled until a working backend image and dependencies
+# have been configured.
+deploy_api = false
+
+# Example placeholder image.
+api_image = "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest"
+
+api_cpu    = 0.5
+api_memory = "1Gi"
+
+api_target_port = 8000
+
+api_min_replicas = 0
+api_max_replicas = 1

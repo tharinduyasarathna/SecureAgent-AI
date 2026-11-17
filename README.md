@@ -237,13 +237,75 @@ These controls do not constitute a completed independent security audit. Additio
 
 Do not upload real credentials, secrets, or confidential security evidence to an unapproved environment.
 
+## Infrastructure as Code (Terraform)
+
+SecureAgent AI includes Terraform-based Infrastructure as Code (IaC) configurations for defining and managing Microsoft Azure infrastructure.
+
+The Terraform configuration provides a reusable foundation for deploying containerized applications and managing supporting cloud resources.
+
+### Azure Infrastructure Components
+
+- **Azure Resource Group:** Organizes project-specific cloud resources.
+- **Azure Container Registry (ACR):** Provides private container image storage.
+- **Azure Container Apps Environment:** Defines the managed environment for containerized application workloads.
+- **Azure Log Analytics:** Provides centralized logging infrastructure.
+- **Optional FastAPI Container App:** Defines a configurable backend hosting resource.
+- **Environment Configuration:** Supports parameterized deployment environments, resource tagging, and configurable resource allocations.
+
+### Terraform Project Structure
+
+```text
+infrastructure/
+└── terraform/
+    ├── versions.tf
+    ├── providers.tf
+    ├── variables.tf
+    ├── main.tf
+    ├── outputs.tf
+    ├── terraform.tfvars.example
+    ├── .gitignore
+    └── README.md
+```
+
+### Terraform Validation
+
+Initialize and validate the configuration:
+
+```bash
+cd infrastructure/terraform
+terraform init
+terraform fmt -recursive
+terraform validate
+```
+
+Review the proposed infrastructure before deployment:
+
+```bash
+terraform plan
+```
+
+Terraform configuration is maintained as part of the repository to support reproducible infrastructure provisioning and future deployment automation.
+
+**Deployment status:** Terraform infrastructure definitions are available, but a complete production deployment of SecureAgent AI has not yet been established.
+
+
 ## Development Status
 
-**Active development — production deployment preparation**
+**Active development — cloud infrastructure and production deployment preparation**
 
-The application has been run locally using Docker Compose, and both backend and frontend Docker images have successfully built in GitHub Actions.
+SecureAgent AI has been developed and run locally using Docker Compose. Backend and frontend Docker images have been built successfully through GitHub Actions.
 
-Current development priorities include production image publishing, hosting, HTTPS, deployment automation, and operational readiness.
+The repository also includes Terraform infrastructure definitions for Azure resource provisioning, container hosting infrastructure, registry management, and centralized logging.
+
+Current development priorities include:
+
+- Completing cloud deployment and HTTPS configuration.
+- Integrating application secrets and persistent data services.
+- Automating infrastructure provisioning and application rollout.
+- Expanding security testing and operational monitoring.
+- Validating production readiness.
+
+The application is not currently represented as a production-hosted or independently security-audited service.
 
 ## Author
 
