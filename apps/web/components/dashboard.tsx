@@ -67,6 +67,14 @@ function severityStyle(severity: string) {
   }
 }
 
+function isPendingReview(status: string | null | undefined) {
+  return status === "pending" || status === "pending_analyst_review";
+}
+
+function displayReviewStatus(status: string | null | undefined) {
+  return isPendingReview(status) ? "Pending review" : status ?? "—";
+}
+
 function formatDate(value: string) {
   const date = new Date(value);
 
@@ -175,9 +183,8 @@ export default function Dashboard() {
       report.severity.toLowerCase() === "critical"
   ).length;
 
-  const pendingReviews = reports.filter(
-    (report) =>
-      report.review_status === "pending_analyst_review"
+  const pendingReviews = reports.filter((report) =>
+    isPendingReview(report.review_status)
   ).length;
 
   const recentReports = reports.slice(0, 5);
@@ -385,10 +392,7 @@ export default function Dashboard() {
                             report.review_status ?? ""
                           }
                         >
-                          {report.review_status ===
-                          "pending_analyst_review"
-                            ? "Pending review"
-                            : report.review_status ?? "—"}
+                          {displayReviewStatus(report.review_status)}
                         </span>
                       </div>
                     </div>
@@ -463,56 +467,41 @@ export default function Dashboard() {
         </div>
 
         <section className="mt-8 grid gap-5 md:grid-cols-3">
-          <div className="flex items-center gap-4 rounded-2xl border border-slate-800 bg-[#101827] p-5">
-            <LockKeyhole
-              size={23}
-              className="text-blue-400"
-            />
-
-            <div>
-              <p className="font-semibold">
-                Permission Controls
-              </p>
-
-              <p className="mt-1 text-xs text-slate-500">
-                Authorized specialist delegation
-              </p>
+          <Link
+            href="/settings"
+            className="group flex items-center gap-4 rounded-2xl border border-slate-800 bg-[#101827] p-5 transition hover:border-blue-500/50 hover:bg-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400"
+          >
+            <LockKeyhole size={23} className="shrink-0 text-blue-400" />
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold">Permission Controls</p>
+              <p className="mt-1 text-xs text-slate-500">Authorized specialist delegation</p>
             </div>
-          </div>
+            <ArrowRight size={17} className="shrink-0 text-slate-500 transition group-hover:translate-x-1 group-hover:text-blue-400" />
+          </Link>
 
-          <div className="flex items-center gap-4 rounded-2xl border border-slate-800 bg-[#101827] p-5">
-            <ShieldCheck
-              size={23}
-              className="text-emerald-400"
-            />
-
-            <div>
-              <p className="font-semibold">
-                Audit Logging
-              </p>
-
-              <p className="mt-1 text-xs text-slate-500">
-                Investigation execution history
-              </p>
+          <Link
+            href="/history"
+            className="group flex items-center gap-4 rounded-2xl border border-slate-800 bg-[#101827] p-5 transition hover:border-emerald-500/50 hover:bg-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-400"
+          >
+            <ShieldCheck size={23} className="shrink-0 text-emerald-400" />
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold">Audit Logging</p>
+              <p className="mt-1 text-xs text-slate-500">Investigation execution history</p>
             </div>
-          </div>
+            <ArrowRight size={17} className="shrink-0 text-slate-500 transition group-hover:translate-x-1 group-hover:text-emerald-400" />
+          </Link>
 
-          <div className="flex items-center gap-4 rounded-2xl border border-slate-800 bg-[#101827] p-5">
-            <FileText
-              size={23}
-              className="text-purple-400"
-            />
-
-            <div>
-              <p className="font-semibold">
-                Structured Reports
-              </p>
-
-              <p className="mt-1 text-xs text-slate-500">
-                Findings and evidence references
-              </p>
+          <Link
+            href="/reports"
+            className="group flex items-center gap-4 rounded-2xl border border-slate-800 bg-[#101827] p-5 transition hover:border-purple-500/50 hover:bg-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-400"
+          >
+            <FileText size={23} className="shrink-0 text-purple-400" />
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold">Structured Reports</p>
+              <p className="mt-1 text-xs text-slate-500">Findings and evidence references</p>
             </div>
-          </div>
+            <ArrowRight size={17} className="shrink-0 text-slate-500 transition group-hover:translate-x-1 group-hover:text-purple-400" />
+          </Link>
         </section>
       </main>
     </div>

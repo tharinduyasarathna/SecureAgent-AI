@@ -33,7 +33,7 @@ import {
   type ReportExportFormat,
   type ReportExportStatus,
 } from "@/lib/report-exports";
-import { getInvestigationReview } from "@/lib/reviews";
+import { getInvestigationReview, submitInvestigationReview, type ReviewDecision } from "@/lib/reviews";
 
 type JsonObject = Record<string, unknown>;
 
@@ -211,6 +211,8 @@ export default function InvestigationReport({ data }: Props) {
   const { token } = useAuth();
 
   const [showRaw, setShowRaw] = useState(false);
+  const [showAdditionalFindings, setShowAdditionalFindings] = useState(true);
+  const [showRecommendations, setShowRecommendations] = useState(true);
   const [copied, setCopied] = useState<string | null>(null);
   const [selectedEvidence, setSelectedEvidence] =
     useState<number | null>(null);
@@ -237,10 +239,17 @@ export default function InvestigationReport({ data }: Props) {
   const [exportMessage, setExportMessage] =
     useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [reviewNotes, setReviewNotes] = useState("");
+  const [submittingDecision, setSubmittingDecision] =
+    useState<ReviewDecision | null>(null);
+  const [decisionError, setDecisionError] = useState<string | null>(null);
+  const [decisionMessage, setDecisionMessage] = useState<string | null>(null);
 
+  const nestedReport = objectOf(data.report);
   const report =
     objectOf(data.structured_report) ??
-    objectOf(data.report) ??
+    objectOf(nestedReport?.structured_report) ??
+    nestedReport ??
     data;
 
   const rawId =
@@ -248,19 +257,17 @@ export default function InvestigationReport({ data }: Props) {
     pick(report, ["investigation_id", "id"]);
 
   const id = typeof rawId === "string" ? rawId : null;
+  const overview = objectOf(report.overview);
+  const authentication =
+    objectOf(report.authentication_details) ??
+    objectOf(overview?.authentication_details);
+  const eventCounts = objectOf(overview?.event_counts);
+  const statistics = objectOf(overview?.authentication_statistics);
 
   const severity = textOf(
-    pick(report, [
-      "overall_severity",
-      "severity",
-      "risk_level",
-    ]) ??
-      pick(objectOf(report.risk_assessment), ["severity"]) ??
-      pick(data, [
-        "overall_severity",
-        "severity",
-        "risk_level",
-      ])
+    pick(objectOf(report.risk_assessment), ["severity"]) ??
+      pick(report, ["overall_severity", "severity", "risk_level"]) ??
+      pick(data, ["overall_severity", "severity", "risk_level"])
   );
 
   const findings = listOf(
@@ -269,67 +276,74 @@ export default function InvestigationReport({ data }: Props) {
   );
 
   const recommendations = listOf(
-    pick(report, [
-      "recommendations",
-      "recommended_actions",
-    ]) ??
-      pick(data, [
-        "recommendations",
-        "recommended_actions",
-      ])
+    pick(report, ["recommendations", "recommended_actions"]) ??
+      pick(data, ["recommendations", "recommended_actions"])
   );
 
+  const reportEvidence = objectOf(report.evidence);
   const evidence = listOf(
-    pick(report, ["evidence", "evidence_items"]) ??
+    reportEvidence?.supplementary_sources ??
+      pick(report, ["evidence_items"]) ??
       pick(data, ["evidence", "evidence_items"])
   );
 
   const primaryFinding = objectOf(findings[0]);
+  const correlatedFinding = findings
+    .map(objectOf)
+    .find((finding) => finding?.type === "successful_login_after_failures") ??
+    primaryFinding;
 
   const username =
-    pick(primaryFinding, ["username", "user", "account"]) ??
+    pick(authentication, ["username"]) ??
+    pick(correlatedFinding, ["username", "user", "account"]) ??
     pick(report, ["username", "user"]);
 
   const failedAttempts =
-    pick(primaryFinding, [
-      "failed_attempts",
-      "failure_count",
-    ]) ??
-    pick(report, ["failed_attempts"]);
+    pick(authentication, ["failed_attempts"]) ??
+    pick(statistics, ["failed_login_attempts"]) ??
+    pick(correlatedFinding, ["failed_attempts", "failure_count"]) ??
+    pick(report, ["failed_attempts"]) ??
+    pick(eventCounts, ["login_failure"]);
+
+  const successfulLoginCount =
+    pick(authentication, ["successful_login_count"]) ??
+    pick(eventCounts, ["login_success"]);
+
+  const successfulLogin =
+    pick(authentication, ["successful_login"]) ??
+    (typeof successfulLoginCount === "number"
+      ? successfulLoginCount > 0
+      : null);
 
   const timestamp =
-    pick(primaryFinding, [
+    pick(correlatedFinding, [
       "successful_login_timestamp",
       "timestamp",
       "event_time",
     ]) ??
-    pick(report, ["created_at", "timestamp"]) ??
-    pick(data, ["created_at"]);
+    pick(report, ["successful_login_timestamp"]);
+
+  const successfulLoginDisplay =
+    successfulLogin === true
+      ? timestamp !== null
+        ? formattedDate(timestamp)
+        : "Yes"
+      : successfulLogin === false
+        ? "No"
+        : timestamp !== null
+          ? formattedDate(timestamp)
+          : "—";
 
   const sourceIp =
-    pick(primaryFinding, [
-      "source_ip",
-      "src_ip",
-      "ip_address",
-    ]) ??
+    pick(authentication, ["source_ip"]) ??
+    pick(correlatedFinding, ["source_ip", "src_ip", "ip_address"]) ??
     pick(report, ["source_ip"]);
 
-  const description = pick(primaryFinding, [
-    "description",
-    "summary",
-  ]);
+  const description = pick(primaryFinding, ["description", "summary"]);
 
   const summary =
-    pick(report, [
-      "executive_summary",
-      "summary",
-      "analysis_summary",
-    ]) ??
-    pick(data, [
-      "executive_summary",
-      "summary",
-      "analysis_summary",
-    ]) ??
+    pick(report, ["executive_summary", "summary", "analysis_summary"]) ??
+    pick(data, ["executive_summary", "summary", "analysis_summary"]) ??
     description;
 
   const title = textOf(
@@ -337,18 +351,25 @@ export default function InvestigationReport({ data }: Props) {
       "Security Investigation Report"
   );
 
-  const evidenceIndices = listOf(
-    pick(primaryFinding, [
-      "evidence_event_indices",
-      "event_indices",
-    ])
-  );
+  const evidenceIndices = Array.from(
+    new Set(
+      findings.flatMap((finding) =>
+        listOf(
+          pick(objectOf(finding), [
+            "evidence_event_indices",
+            "event_indices",
+          ])
+        )
+      ).filter((index): index is number =>
+        typeof index === "number" &&
+        Number.isInteger(index) &&
+        index >= 0
+      )
+    )
+  ).sort((a, b) => a - b);
 
   const findingRecommendations = listOf(
-    pick(primaryFinding, [
-      "recommended_actions",
-      "recommendations",
-    ])
+    pick(primaryFinding, ["recommended_actions", "recommendations"])
   );
 
   const visibleRecommendations =
@@ -357,16 +378,8 @@ export default function InvestigationReport({ data }: Props) {
       : findingRecommendations;
 
   const sourceEvents = listOf(
-    pick(data, [
-      "events",
-      "source_events",
-      "input_events",
-    ]) ??
-      pick(report, [
-        "events",
-        "source_events",
-        "input_events",
-      ])
+    pick(data, ["events", "source_events", "input_events"]) ??
+      pick(report, ["events", "source_events", "input_events"])
   );
 
   const auditKey = `${token ?? ""}:${id ?? ""}`;
@@ -445,6 +458,42 @@ export default function InvestigationReport({ data }: Props) {
       );
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  async function submitDecision(decision: ReviewDecision) {
+    if (!id || !token || submittingDecision || reviewStatus !== "pending") return;
+
+    setSubmittingDecision(decision);
+    setDecisionError(null);
+    setDecisionMessage(null);
+    setExportError(null);
+
+    try {
+      const updated = await submitInvestigationReview(
+        id,
+        token,
+        decision,
+        reviewNotes.trim()
+      );
+      if (!isReviewStatus(updated.status)) {
+        throw new Error("The review API returned an invalid status.");
+      }
+      setReviewStatus(updated.status);
+      setReviewNotes("");
+      setDecisionMessage(
+        updated.status === "approved"
+          ? "Report approved successfully. Export is now available."
+          : updated.status === "rejected"
+            ? "Report rejected. Export remains disabled."
+            : `Review status updated: ${updated.status}.`
+      );
+    } catch (error) {
+      setDecisionError(
+        error instanceof Error ? error.message : "Unable to submit review decision."
+      );
+    } finally {
+      setSubmittingDecision(null);
     }
   }
 
@@ -649,7 +698,7 @@ export default function InvestigationReport({ data }: Props) {
           />
           <Metric
             label="Successful Login"
-            value={formattedDate(timestamp)}
+            value={successfulLoginDisplay}
             icon={CalendarClock}
           />
           <Metric
@@ -821,6 +870,70 @@ export default function InvestigationReport({ data }: Props) {
         </div>
       </section>
 
+      {id && token && (
+        <section className="rounded-2xl border border-slate-800 bg-[#101827] p-6 print:hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-lg font-semibold text-white">Human Analyst Review</h3>
+            <span className={`rounded-full border px-3 py-1 text-xs font-semibold capitalize ${reviewStatusClass(reviewStatus)}`}>
+              {reviewLoading ? "Checking..." : reviewStatus?.replaceAll("_", " ") ?? "Unavailable"}
+            </span>
+          </div>
+          {reviewStatus === "pending" && !reviewLoading && !reviewError ? (
+            <div className="mt-4 space-y-4">
+              <p className="text-sm text-slate-400">
+                Review the findings and evidence before approving or rejecting this report.
+                Your decision is recorded by the authenticated review service.
+              </p>
+              <div>
+                <label htmlFor="analyst-review-notes" className="mb-2 block text-sm font-medium text-slate-300">
+                  Analyst notes (optional)
+                </label>
+                <textarea
+                  id="analyst-review-notes"
+                  value={reviewNotes}
+                  onChange={(event) => setReviewNotes(event.target.value)}
+                  disabled={submittingDecision !== null}
+                  rows={3}
+                  maxLength={2000}
+                  placeholder="Record the rationale for your review decision..."
+                  className="w-full resize-y rounded-xl border border-slate-700 bg-[#080d19] p-3 text-sm text-slate-200 outline-none focus:border-blue-500 disabled:opacity-50"
+                />
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => void submitDecision("approved")}
+                  disabled={submittingDecision !== null}
+                  className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-600 disabled:opacity-50"
+                >
+                  {submittingDecision === "approved" ? <LoaderCircle size={17} className="animate-spin" /> : <Check size={17} />}
+                  Approve Report
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void submitDecision("rejected")}
+                  disabled={submittingDecision !== null}
+                  className="inline-flex items-center gap-2 rounded-lg border border-red-500/50 bg-red-500/10 px-4 py-2.5 text-sm font-semibold text-red-300 hover:bg-red-500/20 disabled:opacity-50"
+                >
+                  {submittingDecision === "rejected" ? <LoaderCircle size={17} className="animate-spin" /> : <X size={17} />}
+                  Reject Report
+                </button>
+              </div>
+            </div>
+          ) : reviewStatus === "approved" ? (
+            <p className="mt-3 text-sm text-emerald-300">This report has been approved. Authorized exports are available.</p>
+          ) : reviewStatus === "rejected" ? (
+            <p className="mt-3 text-sm text-red-300">This report has been rejected. Exports are blocked.</p>
+          ) : reviewStatus === "not_required" ? (
+            <p className="mt-3 text-sm text-blue-300">This report does not require analyst approval.</p>
+          ) : (
+            <p className="mt-3 text-sm text-slate-400">Review status is being checked or could not be verified. No decision can be submitted yet.</p>
+          )}
+          {decisionError && <p role="alert" className="mt-3 text-sm text-red-300">{decisionError}</p>}
+          {decisionMessage && <p role="status" className="mt-3 text-sm text-emerald-300">{decisionMessage}</p>}
+        </section>
+      )}
+
       {summary !== null && (
         <section className="rounded-2xl border border-orange-500/25 bg-orange-500/[0.06] p-6">
           <div className="mb-3 flex items-center gap-3">
@@ -855,7 +968,7 @@ export default function InvestigationReport({ data }: Props) {
                 ["Failed Attempts", failedAttempts],
                 [
                   "Successful Login",
-                  formattedDate(timestamp),
+                  successfulLoginDisplay,
                 ],
                 ["Source IP", sourceIp],
                 ["Severity", severity],
@@ -989,47 +1102,63 @@ export default function InvestigationReport({ data }: Props) {
 
       {findings.length > 1 && (
         <section className="rounded-2xl border border-slate-800 bg-[#101827] p-6">
-          <div className="mb-5 flex items-center gap-3">
-            <ShieldAlert
-              size={21}
-              className="text-orange-400"
-            />
-            <h3 className="text-lg font-semibold">
-              Additional Security Findings
-            </h3>
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowAdditionalFindings((value) => !value)}
+            aria-expanded={showAdditionalFindings}
+            aria-controls="additional-security-findings-content"
+            className={`flex w-full items-center justify-between gap-3 text-left ${showAdditionalFindings ? "mb-5" : ""}`}
+          >
+            <span className="flex items-center gap-3">
+              <ShieldAlert size={21} className="text-orange-400" />
+              <span className="text-lg font-semibold">Additional Security Findings</span>
+            </span>
+            {showAdditionalFindings ? (
+              <ChevronUp size={20} className="shrink-0 text-slate-400" />
+            ) : (
+              <ChevronDown size={20} className="shrink-0 text-slate-400" />
+            )}
+          </button>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            {findings.slice(1).map((finding, index) => (
-              <div
-                key={index}
-                className="rounded-xl border border-slate-800 bg-slate-900/40 p-5"
-              >
-                <h4 className="mb-3 font-semibold">
-                  Finding {index + 2}
-                </h4>
-                <Detail value={finding} />
-              </div>
-            ))}
-          </div>
+          {showAdditionalFindings && (
+            <div id="additional-security-findings-content" className="grid gap-4 lg:grid-cols-2">
+              {findings.slice(1).map((finding, index) => (
+                <div
+                  key={index}
+                  className="rounded-xl border border-slate-800 bg-slate-900/40 p-5"
+                >
+                  <h4 className="mb-3 font-semibold">Finding {index + 2}</h4>
+                  <Detail value={finding} />
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       )}
 
       {visibleRecommendations.length > 0 && (
         <section className="rounded-2xl border border-slate-800 bg-[#101827] p-6">
-          <div className="mb-5 flex items-center gap-3">
-            <ListChecks
-              size={22}
-              className="text-blue-400"
-            />
-            <h3 className="text-lg font-semibold">
-              Recommended Actions
-            </h3>
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowRecommendations((value) => !value)}
+            aria-expanded={showRecommendations}
+            aria-controls="recommended-actions-content"
+            className={`flex w-full items-center justify-between gap-3 text-left ${showRecommendations ? "mb-5" : ""}`}
+          >
+            <span className="flex items-center gap-3">
+              <ListChecks size={22} className="text-blue-400" />
+              <span className="text-lg font-semibold">Recommended Actions</span>
+            </span>
+            {showRecommendations ? (
+              <ChevronUp size={20} className="shrink-0 text-slate-400" />
+            ) : (
+              <ChevronDown size={20} className="shrink-0 text-slate-400" />
+            )}
+          </button>
 
-          <div className="grid gap-3 lg:grid-cols-2">
-            {visibleRecommendations.map(
-              (action, index) => (
+          {showRecommendations && (
+            <div id="recommended-actions-content" className="grid gap-3 lg:grid-cols-2">
+              {visibleRecommendations.map((action, index) => (
                 <div
                   key={index}
                   className="flex items-start gap-3 rounded-xl border border-slate-700/70 bg-[#111e31] p-4"
@@ -1037,14 +1166,13 @@ export default function InvestigationReport({ data }: Props) {
                   <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-blue-500/30 bg-blue-600/20 text-sm font-semibold text-blue-300">
                     {index + 1}
                   </span>
-
                   <div className="min-w-0 pt-1">
                     <Detail value={action} />
                   </div>
                 </div>
-              )
-            )}
-          </div>
+              ))}
+            </div>
+          )}
         </section>
       )}
 

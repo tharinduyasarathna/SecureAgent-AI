@@ -1,4 +1,5 @@
 
+from io import BytesIO
 from pathlib import Path
 
 from fastapi import (
@@ -9,6 +10,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from pypdf import PdfReader
 from sqlalchemy.orm import Session
 
 from apps.api.app.auth_dependencies import get_current_user
@@ -24,8 +26,85 @@ router = APIRouter(
     tags=["RAG Documents"],
 )
 
-MAX_FILE_SIZE = 1 * 1024 * 1024  # 1 MB
+MAX_FILE_SIZE = 5 * 1024 * 1024
+MAX_PDF_PAGES = 50
+MAX_TEXT_CHARACTERS = 100_000
 MAX_CHUNKS = 100
+
+ALLOWED_EXTENSIONS = {".txt", ".pdf"}
+
+
+def extract_pdf_text(raw_content: bytes) -> str:
+    if not raw_content.startswith(b"%PDF-"):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid PDF file",
+        )
+
+    try:
+        reader = PdfReader(
+            BytesIO(raw_content),
+            strict=True,
+        )
+
+        if reader.is_encrypted:
+            raise HTTPException(
+                status_code=400,
+                detail="Encrypted PDFs are not supported",
+            )
+
+        if len(reader.pages) > MAX_PDF_PAGES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"PDF exceeds the {MAX_PDF_PAGES}-page limit"
+                ),
+            )
+
+        extracted_pages = []
+        total_characters = 0
+
+        for page in reader.pages:
+            page_text = page.extract_text() or ""
+
+            total_characters += len(page_text)
+
+            if total_characters > MAX_TEXT_CHARACTERS:
+                raise HTTPException(
+                    status_code=413,
+                    detail="PDF contains too much text",
+                )
+
+            if page_text.strip():
+                extracted_pages.append(page_text)
+
+        return "\n\n".join(extracted_pages)
+
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to read PDF document",
+        ) from None
+
+
+def extract_txt_text(raw_content: bytes) -> str:
+    try:
+        text = raw_content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise HTTPException(
+            status_code=400,
+            detail="Text file must contain UTF-8 text",
+        ) from None
+
+    if len(text) > MAX_TEXT_CHARACTERS:
+        raise HTTPException(
+            status_code=413,
+            detail="Document contains too much text",
+        )
+
+    return text
 
 
 @router.post(
@@ -37,19 +116,14 @@ async def upload_document(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Upload a text document, generate embeddings,
-    and store its chunks in PostgreSQL.
-    """
-
     filename = Path(
         (file.filename or "").replace("\\", "/")
     ).name
 
-    if not filename.lower().endswith(".txt"):
+    if not filename or filename in {".", ".."}:
         raise HTTPException(
             status_code=400,
-            detail="Only .txt files are supported",
+            detail="Invalid filename",
         )
 
     if len(filename) > 255:
@@ -58,8 +132,14 @@ async def upload_document(
             detail="Filename is too long",
         )
 
-    # Read at most 1 MB plus one byte.
-    # This prevents unlimited uploads.
+    extension = Path(filename).suffix.lower()
+
+    if extension not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail="Only .txt and .pdf files are supported",
+        )
+
     try:
         raw_content = await file.read(MAX_FILE_SIZE + 1)
     finally:
@@ -68,16 +148,27 @@ async def upload_document(
     if len(raw_content) > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=413,
-            detail="File exceeds the 1 MB limit",
+            detail="File exceeds the 5 MB limit",
         )
 
-    try:
-        text = raw_content.decode("utf-8")
-    except UnicodeDecodeError:
+    if not raw_content:
         raise HTTPException(
             status_code=400,
-            detail="File must contain UTF-8 text",
-        ) from None
+            detail="Document is empty",
+        )
+
+    if extension == ".pdf":
+        text = extract_pdf_text(raw_content)
+    else:
+        text = extract_txt_text(raw_content)
+
+    if not text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Document contains no extractable text"
+            ),
+        )
 
     chunks = chunk_text(
         text,
@@ -97,9 +188,6 @@ async def upload_document(
             detail="Document contains too many chunks",
         )
 
-    # Generate embeddings before creating database rows.
-    # This avoids holding a database transaction open
-    # while waiting for OpenAI.
     try:
         embeddings = []
 
@@ -145,6 +233,7 @@ async def upload_document(
         "document_id": document.id,
         "filename": document.filename,
         "owner_id": document.owner_id,
+        "file_type": extension.removeprefix("."),
         "chunks_created": len(chunks),
         "embedding_dimensions": 1536,
         "status": "indexed",

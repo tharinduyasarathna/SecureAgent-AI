@@ -12,14 +12,14 @@ from apps.api.agents.tool_planner import (
 
 
 class InvestigationWorkflow:
-    """
-    Bounded, read-only security investigation.
-
-    The LLM selects an initial tool.
-    The backend executes at most two approved tools.
-    """
-
     MAX_STEPS = 2
+
+    SEVERITY_ORDER = {
+        "low": 1,
+        "medium": 2,
+        "high": 3,
+        "critical": 4,
+    }
 
     def __init__(
         self,
@@ -39,7 +39,6 @@ class InvestigationWorkflow:
         granted_permissions: set[str],
         investigation_id: str | None = None,
     ) -> dict:
-
         if not isinstance(events, list):
             raise ValueError("Events must be a list")
 
@@ -48,18 +47,10 @@ class InvestigationWorkflow:
                 "Maximum 1000 events allowed"
             )
 
-        if not isinstance(
-            granted_permissions, set
-        ):
-            raise ValueError(
-                "Invalid permissions"
-            )
+        if not isinstance(granted_permissions, set):
+            raise ValueError("Invalid permissions")
 
-        # Fail closed before calling the LLM.
-        if (
-            "security:read"
-            not in granted_permissions
-        ):
+        if "security:read" not in granted_permissions:
             raise PermissionError(
                 "Missing security:read permission"
             )
@@ -67,9 +58,7 @@ class InvestigationWorkflow:
         if investigation_id is None:
             investigation_id = str(uuid4())
         else:
-            if not isinstance(
-                investigation_id, str
-            ):
+            if not isinstance(investigation_id, str):
                 raise ValueError(
                     "Invalid investigation_id"
                 )
@@ -78,10 +67,7 @@ class InvestigationWorkflow:
                 investigation_id = str(
                     UUID(investigation_id)
                 )
-            except (
-                ValueError,
-                AttributeError,
-            ) as exc:
+            except (ValueError, AttributeError) as exc:
                 raise ValueError(
                     "Invalid investigation_id"
                 ) from exc
@@ -122,6 +108,15 @@ class InvestigationWorkflow:
         steps = []
         results = {}
 
+        failed_login_records = sum(
+            1
+            for event in events
+            if (
+                isinstance(event, dict)
+                and event.get("event_type") == "login_failure"
+            )
+        )
+
         for step_number, tool_name in enumerate(
             ordered_tools,
             start=1,
@@ -133,15 +128,7 @@ class InvestigationWorkflow:
             else:
                 arguments = {
                     "total_events": len(events),
-                    "failed_logins": sum(
-                        1
-                        for event in events
-                        if (
-                            isinstance(event, dict)
-                            and event.get("event_type")
-                            == "login_failure"
-                        )
-                    ),
+                    "failed_logins": failed_login_records,
                 }
 
             result = self.registry.execute(
@@ -158,20 +145,11 @@ class InvestigationWorkflow:
                 "status": "completed",
             })
 
-        analysis = results[
-            "analyze_security_logs"
-        ]
+        analysis = results["analyze_security_logs"]
 
         statistics = dict(
             results["summarize_log_statistics"]
         )
-
-        severity_order = {
-            "low": 1,
-            "medium": 2,
-            "high": 3,
-            "critical": 4,
-        }
 
         findings = analysis["findings"]
 
@@ -180,49 +158,82 @@ class InvestigationWorkflow:
                 finding["severity"]
                 for finding in findings
             ),
-            key=lambda value: (
-                severity_order[value]
-            ),
+            key=lambda value: self.SEVERITY_ORDER[value],
             default="low",
         )
 
-        # Preserve the statistics tool's independent
-        # indicator while exposing a finding-aware
-        # overall risk indicator.
+        total_events = analysis["total_events"]
+        event_counts = analysis["event_counts"]
+
+        failed_attempts = analysis.get(
+            "failed_login_attempts",
+            failed_login_records,
+        )
+
+        if (
+            type(failed_attempts) is not int
+            or failed_attempts < 0
+        ):
+            raise RuntimeError(
+                "Invalid analyzed failed-login count"
+            )
+
         statistics["statistical_risk_indicator"] = (
             statistics.get("risk_indicator")
         )
 
         statistics["risk_indicator"] = (
             "elevated"
-            if severity in {
-                "medium",
-                "high",
-                "critical",
-            }
+            if severity in {"medium", "high", "critical"}
             else "not_elevated"
         )
 
-        statistics["finding_based_severity"] = (
-            severity
+        statistics["finding_based_severity"] = severity
+        statistics["failed_login_records"] = (
+            failed_login_records
+        )
+        statistics["failed_login_attempts"] = (
+            failed_attempts
+        )
+        statistics["total_events"] = total_events
+
+        statistics["successful_logins"] = (
+            event_counts.get("login_success", 0)
+        )
+
+        statistics["failure_rate_basis"] = (
+            "event_records"
+        )
+
+        security_event_types = sorted(
+            event_type
+            for event_type, count in event_counts.items()
+            if count > 0
+        )
+
+        high_severity_findings = sum(
+            1
+            for finding in findings
+            if finding["severity"] in {"high", "critical"}
         )
 
         report = {
             "summary": (
-                f"Analyzed "
-                f"{analysis['total_events']} "
-                f"security events and identified "
-                f"{analysis['finding_count']} "
-                f"findings."
+                f"Analyzed {total_events} security events "
+                f"and identified {analysis['finding_count']} "
+                f"findings. Overall severity: {severity}."
             ),
             "severity": severity,
             "findings": findings,
-            "authentication_statistics": (
-                statistics
+            "authentication_statistics": statistics,
+            "event_counts": event_counts,
+            "failed_login_attempts": failed_attempts,
+            "total_events": total_events,
+            "finding_count": analysis["finding_count"],
+            "high_severity_findings": (
+                high_severity_findings
             ),
-            "event_counts": (
-                analysis["event_counts"]
-            ),
+            "security_event_types": security_event_types,
             "evidence_source": (
                 "supplied_security_events"
             ),

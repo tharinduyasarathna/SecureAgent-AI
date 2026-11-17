@@ -24,7 +24,7 @@ DEFAULT_ACTIONS = {
         "Investigate the source IP and affected account",
         "Revoke suspicious sessions if compromise is suspected",
         "Reset affected credentials if warranted",
-        "Enforce MFA and SSH access controls",
+        "Enforce MFA and review access controls",
     ],
     "repeated_login_failures": [
         "Investigate the source IP and targeted accounts",
@@ -110,6 +110,13 @@ def _build_findings(
             ),
             "source_ip": finding.get("source_ip"),
             "username": finding.get("username"),
+            "failed_attempts": finding.get(
+                "failed_attempts",
+                finding.get("count"),
+            ),
+            "successful_login_timestamp": finding.get(
+                "successful_login_timestamp"
+            ),
             "evidence_event_indices": event_indices,
             "evidence_references": [
                 f"event:{event_index}"
@@ -188,6 +195,101 @@ def _build_recommendations(
     return recommendations
 
 
+def _build_authentication_details(
+    report: dict,
+    findings: list[dict],
+    statistics: dict,
+) -> dict:
+    successful_login_count = report.get(
+        "event_counts", {}
+    ).get("login_success", 0)
+
+    if (
+        type(successful_login_count) is not int
+        or successful_login_count < 0
+    ):
+        successful_login_count = 0
+
+    failed_attempts = statistics.get(
+        "failed_login_attempts"
+    )
+
+    if (
+        type(failed_attempts) is not int
+        or failed_attempts < 0
+    ):
+        failed_attempts = report.get(
+            "failed_login_attempts"
+        )
+
+    if (
+        type(failed_attempts) is not int
+        or failed_attempts < 0
+    ):
+        failed_attempts = None
+
+    usernames = sorted({
+        finding["username"]
+        for finding in findings
+        if (
+            isinstance(finding.get("username"), str)
+            and finding["username"].strip()
+        )
+    })
+
+    source_ips = sorted({
+        finding["source_ip"]
+        for finding in findings
+        if (
+            isinstance(finding.get("source_ip"), str)
+            and finding["source_ip"].strip()
+        )
+    })
+
+    if failed_attempts is None:
+        correlated_counts = [
+            finding.get("failed_attempts")
+            for finding in findings
+            if finding["type"]
+            == "successful_login_after_failures"
+            and type(
+                finding.get("failed_attempts")
+            ) is int
+        ]
+
+        if correlated_counts:
+            failed_attempts = max(
+                correlated_counts
+            )
+
+    if failed_attempts is None:
+        failed_attempts = report.get(
+            "event_counts", {}
+        ).get("login_failure", 0)
+
+    return {
+        "username": (
+            usernames[0]
+            if len(usernames) == 1
+            else None
+        ),
+        "usernames": usernames,
+        "source_ip": (
+            source_ips[0]
+            if len(source_ips) == 1
+            else None
+        ),
+        "source_ips": source_ips,
+        "failed_attempts": failed_attempts,
+        "successful_login": (
+            successful_login_count > 0
+        ),
+        "successful_login_count": (
+            successful_login_count
+        ),
+    }
+
+
 def build_investigation_report(
     *,
     investigation_id: str,
@@ -195,19 +297,10 @@ def build_investigation_report(
     evidence: dict | None,
     synthesis: dict | None,
 ) -> dict:
-    """
-    Create a dashboard-ready investigation report.
-
-    No LLM calls, database writes, network requests,
-    or security tool execution occur here.
-
-    The deterministic incident report determines
-    severity. Synthesis provides explanatory context.
-    """
-
-    if not isinstance(
-        investigation_id, str
-    ) or not investigation_id.strip():
+    if (
+        not isinstance(investigation_id, str)
+        or not investigation_id.strip()
+    ):
         raise ValueError("Invalid investigation ID")
 
     if not isinstance(report, dict):
@@ -240,14 +333,17 @@ def build_investigation_report(
     if not isinstance(statistics, dict):
         raise ValueError("Invalid statistics")
 
+    event_counts = report.get("event_counts", {})
+
+    if not isinstance(event_counts, dict):
+        raise ValueError("Invalid event counts")
+
     total_events = statistics.get("total_events")
 
     if type(total_events) is not int:
         total_events = sum(
             count
-            for count in report.get(
-                "event_counts", {}
-            ).values()
+            for count in event_counts.values()
             if type(count) is int and count >= 0
         )
 
@@ -258,6 +354,14 @@ def build_investigation_report(
 
     recommendations = _build_recommendations(
         findings
+    )
+
+    authentication_details = (
+        _build_authentication_details(
+            report,
+            findings,
+            statistics,
+        )
     )
 
     sources = (
@@ -343,11 +447,15 @@ def build_investigation_report(
                     "high", "critical"
                 }
             ),
-            "event_counts": report.get(
-                "event_counts", {}
-            ),
+            "event_counts": event_counts,
             "authentication_statistics": statistics,
+            "authentication_details": (
+                authentication_details
+            ),
         },
+        "authentication_details": (
+            authentication_details
+        ),
         "findings": findings,
         "recommendations": recommendations,
         "evidence": {

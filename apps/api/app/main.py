@@ -66,6 +66,12 @@ from apps.api.routes.reports import (
 )
 
 
+from apps.api.routes.document_events import (
+    router as document_events_router,
+)
+
+
+
 # ============================================================
 # Application Lifespan
 # ============================================================
@@ -285,3 +291,7 @@ app.include_router(reviews_router)
 
 # Phase 7.7: Secure PDF and JSON report exports
 app.include_router(reports_router)
+
+
+app.include_router(document_events_router)
+
